@@ -6,6 +6,10 @@ import {
 import Svg, { Path, Rect, G, ClipPath, Defs } from 'react-native-svg';
 import { useApp } from '../context/AppContext';
 import { navigationRef } from '../services/NavigationService';
+import LogoutModal from './LogoutModal';
+
+// THE ONLY FIREBASE IMPORT YOU NEED
+import auth from '@react-native-firebase/auth';
 
 const { width } = Dimensions.get('window');
 const IC = '#64748B';
@@ -89,13 +93,18 @@ const ToggleRow = ({ icon, title, subtitle, value, onToggle }) => (
   </View>
 );
 
-const PressRow = ({ icon, title, subtitle, onPress, green }) => (
+// ✅ Added `hasBadge` prop here
+const PressRow = ({ icon, title, subtitle, onPress, green, hasBadge }) => (
   <TouchableOpacity
     style={[s.menuItem, green && s.menuItemGreen]}
     onPress={onPress}
     activeOpacity={0.7}
   >
-    <View style={s.menuIcon}>{icon}</View>
+    <View style={s.menuIcon}>
+      {icon}
+      {/* 🔴 The Red Dot Badge */}
+      {hasBadge && <View style={s.redBadge} />}
+    </View>
     <View style={s.menuText}>
       <Text style={s.menuTitle}>{title}</Text>
       {subtitle && <Text style={s.menuSubtitle}>{subtitle}</Text>}
@@ -106,8 +115,18 @@ const PressRow = ({ icon, title, subtitle, onPress, green }) => (
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 const Sidebar = ({ visible, onClose }) => {
-  const { points, playfulMode, setPlayfulMode, sidebarOpen, setSidebarOpen, ghostMode, setGhostMode } = useApp();
-  const [darkMode,  setDarkMode]  = useState(false);
+  // ✅ 1. Pull BOTH user and userProfile from useApp for bulletproof fallbacks
+  const { 
+    user, userProfile, points, playfulMode, setPlayfulMode, 
+    sidebarOpen, setSidebarOpen, ghostMode, setGhostMode 
+  } = useApp();
+  
+  const [darkMode, setDarkMode] = useState(false);
+  const [isLogoutModalVisible, setLogoutModalVisible] = useState(false);
+  // ✅ Bulletproof fallback: prefers loaded profile, then Auth email, then default
+  const displayName = userProfile?.displayName || user?.email?.split('@')[0] || "User";
+  const avatarUrl = userProfile?.avatar || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_960_720.png';
+  const needsProfileUpdate = userProfile?.needsProfileUpdate || false;
 
   const slideAnim   = useRef(new Animated.Value(-width)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
@@ -126,11 +145,23 @@ const Sidebar = ({ visible, onClose }) => {
     }
   }, [visible]);
 
-  // Close sidebar then navigate so the slide-out animation plays first
   const goTo = (screen) => {
     onClose();
     setTimeout(() => {
       navigationRef.current?.navigate(screen);
+    }, 300);
+  };
+
+  const confirmLogout = () => {
+    setLogoutModalVisible(false);
+    onClose();
+    setTimeout(async () => {
+      try {
+        await auth().signOut(); 
+        // 🚨 DELETE the navigation line here! The App.js listener handles it automatically.
+      } catch (e) {
+        console.error('Logout error:', e);
+      }
     }, 300);
   };
 
@@ -157,14 +188,16 @@ const Sidebar = ({ visible, onClose }) => {
           {/* Profile */}
           <View style={s.profile}>
             <View style={s.avatarWrap}>
+              {/* ✅ Updated to use dynamic URL */}
               <Image
-                source={require('../assets/profile-icon.png')}
+                source={{ uri: avatarUrl }}
                 style={s.avatar}
                 resizeMode="cover"
               />
             </View>
             <View>
-              <Text style={s.name}>Ritik Gaikwad</Text>
+              {/* ✅ Updated to use extracted name */}
+              <Text style={s.name}>{displayName}</Text>
               <View style={s.pointsBadge}>
                 <Text style={s.pointsText}>🔥 {points || 0} PTS</Text>
               </View>
@@ -177,6 +210,7 @@ const Sidebar = ({ visible, onClose }) => {
             icon={<PersonIcon />}
             title="Profile Settings"
             onPress={() => goTo('ProfileSettings')}
+            hasBadge={needsProfileUpdate} // 🔴 Triggers the red dot!
           />
           <ToggleRow
             icon={<GhostIcon />}
@@ -211,7 +245,7 @@ const Sidebar = ({ visible, onClose }) => {
             title="Switch To Business"
             subtitle="Manage your store offers"
             green
-            onPress={() => goTo('BusinessRegister')}  // <--- HERE IS THE FIX!
+            onPress={() => goTo('BusinessRegister')} 
           />
 
           <View style={{ flex: 1, minHeight: 40 }} />
@@ -219,10 +253,7 @@ const Sidebar = ({ visible, onClose }) => {
 
           <TouchableOpacity
             style={s.logoutBtn}
-            onPress={() => Alert.alert('Log Out', 'Are you sure you want to log out?', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Log Out', style: 'destructive', onPress: () => navigationRef.current?.navigate('Login') },
-            ])}
+            onPress={() => setLogoutModalVisible(true)}
           >
             <LogoutIcon />
             <Text style={s.logoutText}>Log Out</Text>
@@ -240,6 +271,14 @@ const Sidebar = ({ visible, onClose }) => {
           </View>
         </ScrollView>
       </Animated.View>
+
+      <LogoutModal
+        visible={isLogoutModalVisible}
+        onClose={() => setLogoutModalVisible(false)}
+        onConfirm={confirmLogout}
+        title="Log Out?"
+        message="Are you sure you want to log out of your account?"
+      />
     </View>
   );
 };
@@ -259,7 +298,21 @@ const s = StyleSheet.create({
   sectionTitle:   { fontSize: 11, fontWeight: '700', color: '#9CA3AF', letterSpacing: 1, marginTop: 26, marginBottom: 8 },
   menuItem:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, gap: 14 },
   menuItemGreen:  { backgroundColor: '#E8F8F2', borderRadius: 14, paddingHorizontal: 14, marginTop: 4 },
-  menuIcon:       { width: 28, alignItems: 'center' },
+  menuIcon:       { width: 28, alignItems: 'center', position: 'relative' }, // ✅ Added relative positioning
+  
+  // 🔴 Red Badge Style Added Here
+  redBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#EF4444',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+
   menuText:       { flex: 1 },
   menuTitle:      { fontSize: 15, fontWeight: '700', color: '#1C1C1E' },
   menuSubtitle:   { fontSize: 12, color: '#9CA3AF', marginTop: 2 },

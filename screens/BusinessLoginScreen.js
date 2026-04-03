@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  KeyboardAvoidingView, Platform, Dimensions
+  KeyboardAvoidingView, Platform, Dimensions, Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, FontAwesome5, AntDesign } from '@expo/vector-icons';
 import { GoogleIcon, AppleIcon, FacebookIcon } from '../components/SocialButtons';
+import { auth } from '../services/firebaseSetup';
 
 const { width } = Dimensions.get('window');
 
@@ -14,9 +15,32 @@ export default function BusinessLoginScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  const handleLogin = () => {
-    // Navigate to the Account Selection screen after logging in
-    navigation.navigate('BusinessSelectAccount');
+  const handleSignIn = async () => {
+    if (!email || !password) {
+      Alert.alert('Error', 'Please fill in all fields');
+      return;
+    }
+    try {
+      const userCredential = await auth.signInWithEmailAndPassword(email, password);
+      console.log('User UID:', userCredential.user.uid);
+      navigation.navigate('BusinessSelectAccount');
+    } catch (error) {
+      Alert.alert('Error', error.message);
+    }
+  };
+
+  const handleSignUp = async () => {
+    if (!email || !password) {
+      Alert.alert('Error', 'Please fill in all fields');
+      return;
+    }
+    try {
+      const userCredential = await auth().createUserWithEmailAndPassword(email, password);
+      console.log('User UID:', userCredential.user.uid);
+      Alert.alert("Success", "Account created!");
+    } catch (error) {
+      Alert.alert('Error', error.message);
+    }
   };
 
   return (
@@ -76,8 +100,14 @@ export default function BusinessLoginScreen({ navigation }) {
           </TouchableOpacity>
 
           {/* LOGIN BUTTON */}
-          <TouchableOpacity style={s.loginBtn} onPress={handleLogin} activeOpacity={0.85}>
+          <TouchableOpacity style={s.loginBtn} onPress={handleSignIn} activeOpacity={0.85}>
             <Text style={s.loginBtnText}>Log-in</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={handleSignUp} style={{ alignItems: 'center', marginBottom: 24 }}>
+            <Text style={{ fontSize: 14, color: '#64748B' }}>
+              Don't have an account? <Text style={{ color: '#4338CA', fontWeight: '700' }}>Sign Up</Text>
+            </Text>
           </TouchableOpacity>
 
           {/* DIVIDER */}

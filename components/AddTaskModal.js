@@ -8,6 +8,7 @@ import Svg, { Path } from 'react-native-svg';
 import { Feather } from '@expo/vector-icons';
 import { useApp } from '../context/AppContext';
 import { PREDEFINED_TASKS, findMatchingTask } from '../constants/tasks';
+import { suggestedTasksByCategory } from '../utils/smartTaskEngine';
 
 const MAX_TASKS = 6;
 
@@ -38,7 +39,10 @@ const getTaskIcon = (time) => {
 };
 
 const AddTaskModal = ({ visible, onClose }) => {
-  const { addTask, removeTask, tasks } = useApp();
+  const { addTask, removeTask, tasks, draftTasks, setDraftTasks } = useApp();
+  
+  const isDraftMode = tasks.length === 0;
+  const effectiveTasks = isDraftMode ? draftTasks : tasks;
   const [activeTab, setActiveTab] = useState('Morning');
   const [taskInput, setTaskInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -53,8 +57,8 @@ const AddTaskModal = ({ visible, onClose }) => {
   }, [visible]);
 
   const currentTabTasks = useMemo(
-    () => tasks.filter(t => t.time === activeTab),
-    [tasks, activeTab]
+    () => effectiveTasks.filter(t => (t.timeCategory || t.time) === activeTab),
+    [effectiveTasks, activeTab]
   );
 
   const isMaxReached = currentTabTasks.length >= MAX_TASKS;
@@ -74,20 +78,33 @@ const AddTaskModal = ({ visible, onClose }) => {
   const handleToggleSuggestion = (task) => {
     if (isInList(task.name)) {
       const existing = getTaskFromList(task.name);
-      if (existing) removeTask(existing.id);
+      if (existing) {
+        if (isDraftMode) {
+          setDraftTasks(draftTasks.filter(t => t.name !== existing.name));
+        } else {
+          removeTask(existing.id);
+        }
+      }
     } else {
       if (isMaxReached) {
         Alert.alert('Limit Reached', `Max ${MAX_TASKS} tasks per ${activeTab}!`);
         return;
       }
-      addTask({
+      const taskObj = {
         name: task.name,
         icon: task.icon,
         time: activeTab,
+        timeCategory: activeTab,
         descPlayful: task.descPlayful,
         descProfessional: task.descProfessional,
-        order: task.order || 50 // ADDED: Pulls order from the predefined task!
-      });
+        order: task.order || 50
+      };
+
+      if (isDraftMode) {
+        setDraftTasks([...draftTasks, taskObj]);
+      } else {
+        addTask(taskObj);
+      }
     }
   };
 
@@ -113,14 +130,22 @@ const AddTaskModal = ({ visible, onClose }) => {
         setLoading(false);
         return;
       }
-      addTask({ 
+      const taskObj = { 
         name: match.name, 
         icon: match.icon, 
         time: activeTab, 
+        timeCategory: activeTab,
         descPlayful: match.descPlayful, 
         descProfessional: match.descProfessional,
         order: match.order || 50 // ADDED: Pulls order from match
-      });
+      };
+
+      if (isDraftMode) {
+        setDraftTasks([...draftTasks, taskObj]);
+        setTaskInput('');
+      } else {
+        addTask(taskObj);
+      }
     } else {
       try {
         const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -150,25 +175,39 @@ const AddTaskModal = ({ visible, onClose }) => {
 
         const aiResponse = JSON.parse(rawText);
 
-        addTask({ 
+        const taskObj = { 
           name: trimmed, 
           icon: '⚡', 
           time: activeTab, 
+          timeCategory: activeTab,
           descPlayful: aiResponse.sassy || "You know what to do 😏", 
           descProfessional: aiResponse.pro || `Time to complete your ${trimmed} habit.`,
-          order: aiResponse.order || 50 // ADDED: Saves the AI's chronologic guess
-        });
+          order: aiResponse.order || 50
+        };
+
+        if (isDraftMode) {
+          setDraftTasks([...draftTasks, taskObj]);
+        } else {
+          addTask(taskObj);
+        }
 
       } catch (err) {
         console.log("AI parsing error:", err);
-        addTask({ 
+        const taskObj = { 
           name: trimmed, 
           icon: '⚡', 
-          time: activeTab, 
+          time: activeTab,
+          timeCategory: activeTab, 
           descPlayful: "You know what to do 😏", 
           descProfessional: `Time to complete your ${trimmed} habit.`,
-          order: 50
-        });
+          order: 50 
+        };
+
+        if (isDraftMode) {
+          setDraftTasks([...draftTasks, taskObj]);
+        } else {
+          addTask(taskObj);
+        }
       }
     }
     
@@ -176,7 +215,26 @@ const AddTaskModal = ({ visible, onClose }) => {
     setTaskInput('');
   };
 
-  const totalTasks = tasks.length;
+  const handleSaveAndClose = async () => {
+    // 1. If there's custom text in the input, add it as a task first
+    if (taskInput.trim().length > 0) {
+      console.log("📝 Custom task text found - adding before close:", taskInput);
+      await handleAddManual();
+      // Small delay to let the task save
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+    
+    // 2. Clear all inputs
+    setTaskInput('');
+    setActiveTab('Morning');
+    setActiveSection('suggestions');
+    
+    // 3. Close the modal
+    console.log("✅ Save & Close complete - closing modal");
+    onClose();
+  };
+
+  const currentTaskCount = isDraftMode ? draftTasks.length : tasks.length;
 
   return (
     <Modal transparent visible={visible} animationType="fade">
@@ -200,7 +258,7 @@ const AddTaskModal = ({ visible, onClose }) => {
 
           <View style={s.tabs}>
             {TIME_TABS.map(({ label, Icon }) => {
-              const count = tasks.filter(t => t.time === label).length;
+              const count = tasks.filter(t => (t.timeCategory || t.time) === label).length;
               return (
                 <TouchableOpacity
                   key={label}
@@ -288,10 +346,79 @@ const AddTaskModal = ({ visible, onClose }) => {
             <>
               <View style={s.sectionHeader}>
                 <Text style={s.sectionLabel}>
-                  {taskInput ? 'Matching Tasks' : 'Suggested Habits'}
+                  {taskInput ? 'Matching Tasks' : 'Quick Suggestions'}
                 </Text>
                 {isMaxReached && <Text style={s.maxText}>{activeTab} full!</Text>}
               </View>
+
+              {/* ✨ HORIZONTAL SCROLLVIEW: All suggested tasks from suggestedTasksByCategory */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={s.quickSuggestionsContainer}
+                style={s.quickSuggestionsScroll}
+              >
+                {(suggestedTasksByCategory[activeTab] || []).map((suggestedTask, idx) => {
+                  const added = isInList(suggestedTask);
+                  return (
+                    <TouchableOpacity
+                      key={`${activeTab}-${idx}`}
+                      style={[s.quickSuggestionBtn, added && s.quickSuggestionBtnAdded]}
+                      onPress={() => {
+                        console.log("🔘 Quick suggestion clicked:", suggestedTask, "| Time Category:", activeTab);
+                        if (isInList(suggestedTask)) {
+                          console.log("➖ Removing existing task:", suggestedTask);
+                          const existing = getTaskFromList(suggestedTask);
+                          if (existing) {
+                            if (isDraftMode) {
+                              setDraftTasks(draftTasks.filter(t => t.name !== existing.name));
+                            } else {
+                              removeTask(existing.id);
+                            }
+                          }
+                        } else {
+                          if (isMaxReached) {
+                            console.log("🛑 Max reached for", activeTab);
+                            Alert.alert('Slot Full 🛑', `Max ${MAX_TASKS} tasks in ${activeTab}. Focus on what matters!`);
+                            return;
+                          }
+                          console.log("➕ Adding new task via addTask():", { name: suggestedTask, time: activeTab });
+                          const newTaskObj = {
+                            name: suggestedTask,
+                            icon: '⭐',
+                            time: activeTab,
+                            timeCategory: activeTab,
+                            descPlayful: `Time for ${suggestedTask} 🎯`,
+                            descProfessional: `Complete ${suggestedTask} as part of your ${activeTab} routine.`,
+                            order: 50
+                          };
+                          if (isDraftMode) {
+                            setDraftTasks([...draftTasks, newTaskObj]);
+                          } else {
+                            addTask(newTaskObj);
+                          }
+                        }
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[s.quickSuggestionText, added && s.quickSuggestionTextAdded]}>
+                        {suggestedTask}
+                      </Text>
+                      <Text style={[s.quickSuggestionBadge, added && s.quickSuggestionBadgeAdded]}>
+                        {added ? '✓' : '+'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              <View style={s.divider} />
+
+              <View style={s.sectionHeader}>
+                <Text style={s.sectionLabel}>More Tasks</Text>
+              </View>
+
+              {/* VERTICAL SCROLLVIEW: Detailed predefined tasks */}
               <ScrollView
                 style={s.list}
                 showsVerticalScrollIndicator={false}
@@ -307,7 +434,7 @@ const AddTaskModal = ({ visible, onClose }) => {
                     const added = isInList(task.name);
                     return (
                       <TouchableOpacity
-                        key={task.id}
+                        key={task.id || task.name}
                         style={[s.row, added && s.rowAdded]}
                         onPress={() => handleToggleSuggestion(task)}
                         activeOpacity={0.7}
@@ -347,8 +474,8 @@ const AddTaskModal = ({ visible, onClose }) => {
                     </TouchableOpacity>
                   </View>
                 ) : (
-                  currentTabTasks.map(task => (
-                    <View key={task.id} style={s.addedRow}>
+                  currentTabTasks.map((task, index) => (
+                    <View key={task.id || task.name || index} style={s.addedRow}>
                       <Text style={s.rowIcon}>{task.icon}</Text>
                       <Text style={s.addedRowText}>{task.name}</Text>
                       <TouchableOpacity
@@ -365,7 +492,7 @@ const AddTaskModal = ({ visible, onClose }) => {
             </>
           )}
 
-          <TouchableOpacity onPress={onClose} activeOpacity={0.85} style={{ marginTop: 12 }}>
+          <TouchableOpacity onPress={handleSaveAndClose} activeOpacity={0.85} style={{ marginTop: 12 }}>
             <LinearGradient
               colors={['#10B981', '#059669']}
               start={{ x: 0, y: 0 }}
@@ -373,7 +500,7 @@ const AddTaskModal = ({ visible, onClose }) => {
               style={s.saveBtn}
             >
               <Text style={s.saveBtnText}>
-                ✓ Save & Close · {totalTasks} task{totalTasks !== 1 ? 's' : ''} total
+                ✓ Save & Close · {currentTaskCount} task{currentTaskCount !== 1 ? 's' : ''} total
               </Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -421,7 +548,57 @@ const s = StyleSheet.create({
   maxText: { fontSize: 12, color: '#EF4444', fontWeight: '600' },
   emptyHint: { fontSize: 12, color: '#9CA3AF' },
 
-  list: { maxHeight: 220 },
+  list: { maxHeight: 180 },
+
+  // ✨ Quick Suggestions Horizontal ScrollView Styles
+  quickSuggestionsScroll: { marginBottom: 12, maxHeight: 110 },
+  quickSuggestionsContainer: { paddingHorizontal: 0, paddingRight: 12, gap: 8 },
+  quickSuggestionBtn: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginRight: 4,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    minWidth: 140,
+  },
+  quickSuggestionBtnAdded: {
+    backgroundColor: '#D1FAE5',
+    borderColor: '#10B981',
+  },
+  quickSuggestionText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+    flex: 1,
+  },
+  quickSuggestionTextAdded: {
+    color: '#10B981',
+  },
+  quickSuggestionBadge: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#9CA3AF',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    textAlign: 'center',
+    textAlignVertical: 'center',
+  },
+  quickSuggestionBadgeAdded: {
+    color: '#fff',
+    backgroundColor: '#10B981',
+  },
+
+  divider: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    marginVertical: 8,
+  },
 
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, marginBottom: 4, backgroundColor: '#F9FAFB' },
   rowAdded: { backgroundColor: '#F0FDF4' },
@@ -444,6 +621,49 @@ const s = StyleSheet.create({
 
   saveBtn: { borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
   saveBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  suggestionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 100,
+    paddingVertical: 10,
+    paddingLeft: 12,
+    paddingRight: 16,
+  },
+  chipIcon: {
+    fontSize: 16,
+    marginRight: 7,
+  },
+  chipText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#334155',
+    marginRight: 10,
+  },
+  chipPlus: {
+    backgroundColor: '#E2E8F0',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipPlusText: {
+    fontSize: 13,
+    color: '#64748B',
+    fontWeight: '700',
+    lineHeight: 18,
+  },
 });
 
 export default AddTaskModal;

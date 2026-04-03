@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Switch, Animated, Easing, Dimensions, Image, ScrollView
+  Switch, Animated, Easing, Dimensions, Image, ScrollView, Alert
 } from 'react-native';
 import Svg, { Path, Circle, Polyline, Line } from 'react-native-svg';
 import { useApp } from '../context/AppContext';
 import { navigationRef } from '../services/NavigationService';
+import { auth } from '../services/firebaseSetup';
+import LogoutModal from './LogoutModal';
 
 const { width } = Dimensions.get('window');
 
@@ -108,6 +110,7 @@ const ToggleRow = ({ icon, title, value, onToggle }) => (
 export default function BusinessSidebar({ visible, onClose }) {
   const [darkMode, setDarkMode] = useState(false);
   const [notifications, setNotifications] = useState(true);
+  const [isLogoutModalVisible, setLogoutModalVisible] = useState(false);
 
   const slideAnim = useRef(new Animated.Value(-width)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
@@ -130,6 +133,19 @@ export default function BusinessSidebar({ visible, onClose }) {
     onClose();
     setTimeout(() => {
       navigationRef.current?.navigate(screen);
+    }, 300);
+  };
+
+  const confirmLogout = () => {
+    setLogoutModalVisible(false);
+    onClose();
+    setTimeout(async () => {
+      try {
+        await auth.signOut();
+        navigationRef.current?.navigate('Login');
+      } catch (e) {
+        console.error('Logout error:', e);
+      }
     }, 300);
   };
 
@@ -182,7 +198,10 @@ export default function BusinessSidebar({ visible, onClose }) {
           <View style={s.divider} />
 
           {/* LOGOUT */}
-          <TouchableOpacity style={s.logoutBtn} onPress={() => goTo('Login')}>
+          <TouchableOpacity 
+            style={s.logoutBtn} 
+            onPress={() => setLogoutModalVisible(true)}
+          >
             <LogoutIcon />
             <Text style={s.logoutText}>Log Out</Text>
           </TouchableOpacity>
@@ -203,6 +222,14 @@ export default function BusinessSidebar({ visible, onClose }) {
 
         </ScrollView>
       </Animated.View>
+
+      <LogoutModal
+        visible={isLogoutModalVisible}
+        onClose={() => setLogoutModalVisible(false)}
+        onConfirm={confirmLogout}
+        title="Log Out?"
+        message="Are you sure you want to log out of your merchant account?"
+      />
     </View>
   );
 }

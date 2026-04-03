@@ -1,18 +1,74 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity,
+  View, Text, TouchableOpacity, ScrollView,
   StyleSheet, Dimensions, Animated, PanResponder, Image, Modal, TouchableWithoutFeedback
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import Svg, { Path, G, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useApp } from '../context/AppContext';
+import { useApp, SUGGESTED_HABITS } from '../context/AppContext';
 import CustomAlertModal from '../components/CustomAlertModal';
 import { useTimeBlock } from '../hooks/useTimeBlock';
+import { getQuoteOfTheDay } from '../utils/quotes';
+
+// ✅ IMPORT THE NEW SMART EMOJI ENGINE HERE
+import { getTaskEmoji } from '../utils/smartTaskEngine';
+
+const getTimeOfDay = () => {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) return 'morning';
+  if (hour >= 12 && hour < 17) return 'afternoon';
+  if (hour >= 17 && hour < 22) return 'evening';
+  return 'night';
+};
+
+const CATEGORY_WEIGHTS = { morning: 1, afternoon: 2, evening: 3, night: 4 };
+
+const TIME_BASED_QUOTES = {
+  morning: ["Rise and grind! Let's get it.", "Fresh morning, fresh start.", "Time to dominate your morning."],
+  afternoon: ["Keep that momentum rolling!", "Halfway there. Don't stop now.", "Afternoon slump? Not for you."],
+  evening: ["Sun is setting, but you're still winning.", "Wind down and reflect on a good day.", "Evening push! Finish strong."],
+  night: ["Time to rest the brain.", "Sleep well, tomorrow is a new battle.", "Midnight oil burned. Go to sleep."]
+};
+
+const COMPLETION_DATA = {
+  morning: { icon: '☕', text: 'Morning routine crushed! Grab that coffee and enjoy the day.' },
+  afternoon: { 
+    icon: '🌴', 
+    text: 'Afternoon cleared! Kick back and relax. Your evening routine kicks off at 5:00 PM.' 
+  },
+  evening: { icon: '🍷', text: 'All done. Time to wind down and relax.' },
+  night: { icon: '🌙', text: 'Perfect day. Get some well-deserved sleep.' }
+};
+
+const SASSY_TIME_QUOTES = {
+  morning: ["Oh, you're awake? Prove you're not useless today.", "Drink water or dry up like a raisin. Let's go.", "Get up. Your competitors are already working."],
+  afternoon: ["Are you napping? Wake up and swipe these tasks.", "Half the day is gone. What have you actually done?", "No excuses. Get it done."],
+  evening: ["Don't even think about opening Netflix yet.", "Finish your list so I can stop judging you.", "Wrap it up, boss. You're almost done."],
+  night: ["Go to sleep. You're making bad decisions.", "Task list done? Finally. Go to bed.", "Stop scrolling. Put the phone down."]
+};
+
+const SASSY_COMPLETION_DATA = {
+  morning: { icon: '☕', text: 'Wow, you actually finished early. Don\'t let it get to your head.' },
+  afternoon: { 
+    icon: '🛋️', 
+    text: 'Enjoy your little break. Don\'t get too comfortable though—your evening shift starts at 5:00 PM sharp.' 
+  },
+  evening: { icon: '🍷', text: 'Finally finished. Pour a glass and leave me alone.' },
+  night: { icon: '🌙', text: 'Barely made it before midnight. Go to sleep.' }
+};
+
+const formatTime = (minutes) => {
+  if (!minutes) return '0 min';
+  if (minutes < 60) return `${minutes} min`;
+  const hrs = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`;
+};
 
 const { width, height } = Dimensions.get('window');
-const CARD_HEIGHT = height < 700 ? 280 : height < 800 ? 320 : 350;
+const CARD_HEIGHT = height < 700 ? 320 : height < 800 ? 380 : 400;
 
 const FILTER_OPTIONS = [
   { key: 'week',  label: 'Weekly' },
@@ -36,9 +92,25 @@ const getStartOfPeriod = (period) => {
 const filterTasksByPeriod = (tasks, period) => {
   if (period === 'all') return tasks;
   const start = getStartOfPeriod(period);
+  
   return tasks.filter(t => {
-    const created = t.createdAt ? new Date(t.createdAt) : null;
-    if (!created) return true; 
+    // 🔥 BULLETPROOF FIREBASE DATE PARSER 🔥
+    let created = null;
+    
+    if (t.createdAt) {
+      if (typeof t.createdAt.toDate === 'function') {
+        created = t.createdAt.toDate(); // Native Firebase object
+      } else if (t.createdAt.seconds) {
+        created = new Date(t.createdAt.seconds * 1000); // Serialized object
+      } else {
+        created = new Date(t.createdAt); // Standard string/number fallback
+      }
+    }
+    
+    // If it's a brand new task waiting for a server timestamp, 
+    // or if the date is invalid, ALWAYS show it so it doesn't disappear!
+    if (!created || isNaN(created.getTime())) return true; 
+    
     return created >= start;
   });
 };
@@ -303,22 +375,133 @@ const FilterDropdown = ({ visible, selected, onSelect, onClose, anchorRef }) => 
   );
 };
 
-const getTaskIcon = (time) => {
-  const t = time?.toLowerCase();
-  if (t === 'morning') return 'sunrise';
-  if (t === 'afternoon') return 'sun';
-  if (t === 'evening' || t === 'night') return 'moon';
-  return 'check-circle';
+// ── SMART SASSY GENERATOR (DYNAMIC & FLICKER-FREE) ──
+const getFallbackDesc = (name, isPlayful) => {
+  const n = name?.toLowerCase() || '';
+
+  // 1. PROFESSIONAL MODE (Randomized, but stable)
+  if (!isPlayful) {
+    const proFallbacks = [
+      "Stay focused and crush this. ✨",
+      "Small steps lead to big results. 📈",
+      "Execute with precision. 🎯",
+      "Consistency is the ultimate key. 🔑",
+      "Clear your mind and begin. 🧠"
+    ];
+    return proFallbacks[n.length % proFallbacks.length];
+  }
+
+  // 2. SPECIFIC KEYWORDS (Sassy Mode)
+  if (n.includes('water') || n.includes('drink')) return "Hydrate, you complicated houseplant. 🌿";
+  if (n.includes('gym') || n.includes('workout') || n.includes('lift')) return "Couch potatoes don't make history. 💪";
+  if (n.includes('read') || n.includes('book')) return "Doomscrolling isn't reading. 📚";
+  if (n.includes('sleep') || n.includes('bed')) return "The internet can wait. Go to sleep. 🌙";
+  if (n.includes('meditat') || n.includes('breath')) return "Sit still and literally do nothing. You can do this. 🧘♂️";
+  if (n.includes('walk') || n.includes('steps')) return "Go touch grass. Literally. 🚶♂️";
+  if (n.includes('clean') || n.includes('tidy') || n.includes('wash')) return "Your space reflects your brain. Clean it up. 🧹";
+  if (n.includes('eat') || n.includes('meal') || n.includes('food')) return "Fuel up. You aren't you when you're hungry. 🍽️";
+  if (n.includes('code') || n.includes('dev')) return "Git commit to your habits. No merge conflicts. 💻";
+  if (n.includes('design') || n.includes('ui') || n.includes('ux')) return "Push pixels, not deadlines. Make it pop. ✨";
+  if (n.includes('game') || n.includes('play')) return "Level up IRL, not just on the screen. 🎮";
+
+  // 3. DYNAMIC FALLBACKS (Never the same line twice!)
+  const sassyFallbacks = [
+    "Your future self is begging you. 🚀",
+    "Do it now, or regret it later. ⏳",
+    "Stop staring at this card and just do it. 🙄",
+    "I'm judging you until this is done. 👀",
+    "Procrastination is so last year. 💅",
+    "Be the main character you claim to be. 🌟"
+  ];
+
+  // Uses the length of the task name to predictably pick a random quote
+  return sassyFallbacks[n.length % sassyFallbacks.length];
 };
+
+// ── SKELETON LOADER ANIMATION ──
+const SkeletonBlock = ({ width, height, borderRadius = 8, style }) => {
+  const pulseAnim = useRef(new Animated.Value(0.4)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.8, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 0.4, duration: 800, useNativeDriver: true })
+      ])
+    ).start();
+  }, []);
+
+  return (
+    <Animated.View
+      style={[{ width, height, borderRadius, backgroundColor: '#CBD5E1', opacity: pulseAnim }, style]}
+    />
+  );
+};
+
+const HomeScreenSkeleton = () => (
+  <SafeAreaView style={[s.safe, { paddingHorizontal: 20, paddingTop: 16 }]}>
+    {/* Header Skeleton */}
+    <View style={s.header}>
+      <SkeletonBlock width={48} height={48} borderRadius={24} />
+      <View style={{ flexDirection: 'row', gap: 12 }}>
+        <SkeletonBlock width={90} height={36} borderRadius={20} />
+        <SkeletonBlock width={79} height={36} borderRadius={20} />
+      </View>
+    </View>
+
+    {/* Greeting Skeleton */}
+    <View style={{ marginTop: 20, gap: 8 }}>
+      <SkeletonBlock width={120} height={16} />
+      <SkeletonBlock width={200} height={32} />
+    </View>
+
+    {/* Quote Skeleton */}
+    <View style={{ marginTop: 24, marginBottom: 32, gap: 8 }}>
+      <SkeletonBlock width={16} height={16} borderRadius={8} />
+      <SkeletonBlock width="100%" height={16} />
+      <SkeletonBlock width="80%" height={16} />
+      <SkeletonBlock width={100} height={12} style={{ marginTop: 8 }} />
+    </View>
+
+    {/* Main Card Skeleton */}
+    <SkeletonBlock width="100%" height={CARD_HEIGHT} borderRadius={32} style={{ marginBottom: 24 }} />
+
+    {/* Bottom Filter & Stats Skeleton */}
+    <View style={s.filterCard}>
+      <View style={[s.filterRow, { marginBottom: 16 }]}>
+        <SkeletonBlock width={100} height={36} borderRadius={20} />
+        <SkeletonBlock width={40} height={40} borderRadius={20} />
+      </View>
+      <View style={s.statsRow}>
+        <SkeletonBlock width={60} height={50} />
+        <SkeletonBlock width={60} height={50} />
+        <SkeletonBlock width={60} height={50} />
+      </View>
+    </View>
+  </SafeAreaView>
+);
 
 // ADDED NAVIGATION PROP HERE!
 const HomeScreen = ({ navigation }) => {
+  const [timeOfDay, setTimeOfDay] = useState(getTimeOfDay());
   const {
-    setSidebarOpen, playfulMode, tasks, points,
+    user, userProfile, points,
+    setSidebarOpen, playfulMode, tasks,
     completedCount, skippedCount, remainingCount,
-    skipsCount, completeTask, skipTask,
+    skipsCount, completeTask, skipTask, saveBulkTasks,
   } = useApp();
   const { currentBlock, nextBlockName, timeUntilNextBlock } = useTimeBlock();
+
+  // ✅ 2. Set up the dynamic name and avatar
+  const displayName = userProfile?.displayName || user?.email?.split('@')[0] || "User";
+  const avatarUrl = userProfile?.avatar || 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_960_720.png';
+
+  // ✅ 3. Generate the dynamic quote based on Sassy Mode
+  const activeQuotes = playfulMode ? SASSY_TIME_QUOTES[timeOfDay] : TIME_BASED_QUOTES[timeOfDay];
+  const currentQuote = useMemo(() => activeQuotes[Math.floor(Math.random() * activeQuotes.length)], [timeOfDay, playfulMode]);
+  const completionInfo = playfulMode ? SASSY_COMPLETION_DATA[timeOfDay] : COMPLETION_DATA[timeOfDay];
+
+  const [isLoading, setIsLoading] = useState(true);
 
   const [filterPeriod, setFilterPeriod] = useState('week');
   const [showFilter, setShowFilter]     = useState(false);
@@ -332,12 +515,44 @@ const HomeScreen = ({ navigation }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [skipPressed, setSkipPressed]   = useState(false);
 
-  const blockTasks = tasks;
-  const periodTasks   = filterTasksByPeriod(blockTasks, filterPeriod);
+  // 🔍 DEBUG: Log tasks flow
+  useEffect(() => {
+    console.log("🏠 HomeScreen - Tasks from Context:", tasks.length, "tasks");
+    if (tasks.length > 0) {
+      console.log("  First 2 tasks:", tasks.slice(0, 2).map(t => ({ name: t.name, timeCategory: t.timeCategory, completed: t.completed })));
+    }
+  }, [tasks]);
+
+  const periodTasks = filterTasksByPeriod(tasks, filterPeriod);
   
-  const TASKS = periodTasks
-    .filter(t => !t.completed && !t.skipped)
-    .sort((a, b) => (a.order || 50) - (b.order || 50)); 
+  const activeSwipeTasks = useMemo(() => {
+    if (!periodTasks) return [];
+    
+    const currentWeight = CATEGORY_WEIGHTS[timeOfDay] || 1;
+    
+    const filtered = periodTasks.filter(task => {
+      if (task.completed || task.skipped) return false;
+      
+      // Force strictly lowercase, trim spaces, and default to morning
+      const taskCategory = (task.timeCategory || 'morning').toLowerCase().trim();
+      const taskWeight = CATEGORY_WEIGHTS[taskCategory] || 1;
+      
+      return taskWeight <= currentWeight;
+    }).sort((a, b) => (a.order || 50) - (b.order || 50));
+    
+    console.log(`[Time: ${timeOfDay}] Total Tasks: ${periodTasks.length} | Filtered Active Tasks: ${filtered.length}`);
+    return filtered;
+  }, [periodTasks, timeOfDay]);
+
+  // 🔍 DEBUG: Log filtered tasks
+  useEffect(() => {
+    console.log("🎯 Filtered TASKS (active):", activeSwipeTasks.length, "tasks ready to display");
+    if (activeSwipeTasks.length === 0 && tasks.length > 0) {
+      console.log("⚠️  All tasks are completed, skipped, or future!");
+      console.log("  Completed:", tasks.filter(t => t.completed).length);
+      console.log("  Skipped:", tasks.filter(t => t.skipped).length);
+    }
+  }, [activeSwipeTasks, tasks]);
 
   const [recentDones, setRecentDones] = useState([]);
   const [isLocked, setIsLocked]       = useState(false);
@@ -353,9 +568,9 @@ const HomeScreen = ({ navigation }) => {
   const floatAnimY       = useRef(new Animated.Value(0)).current;
   const floatAnimOpacity = useRef(new Animated.Value(0)).current;
 
-  const task     = TASKS[Math.min(currentIndex, TASKS.length - 1)];
-  const nextTask = TASKS[currentIndex + 1];
-  const isDone   = TASKS.length === 0;
+  const task     = activeSwipeTasks[Math.min(currentIndex, activeSwipeTasks.length - 1)];
+  const nextTask = activeSwipeTasks[currentIndex + 1];
+  const isDone   = activeSwipeTasks.length === 0;
 
   const triggerFloat = (amount, positive) => {
     setFloatText(positive ? `+${amount}` : `-${amount}`);
@@ -380,6 +595,14 @@ const HomeScreen = ({ navigation }) => {
     }
     return () => clearInterval(interval);
   }, [isLocked, lockTimer]);
+
+  // Fake Network Request (Remove this when we add real Firebase data!)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, []);
 
   const closeAlert = () => setModalConfig(prev => ({ ...prev, visible: false }));
 
@@ -464,13 +687,19 @@ const HomeScreen = ({ navigation }) => {
 
   const selectedLabel = FILTER_OPTIONS.find(o => o.key === filterPeriod)?.label ?? 'This Week';
 
+  // IF LOADING: Show the Skeleton!
+  if (isLoading) {
+    return <HomeScreenSkeleton />;
+  }
+
   return (
     <SafeAreaView style={[s.safe, isRestModeActive && { backgroundColor: '#F8FAFC' }]}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
 
       <View style={s.topSection}>
         <View style={s.header}>
           <TouchableOpacity onPress={() => setSidebarOpen(true)} activeOpacity={0.8}>
-            <Image source={require('../assets/profile-icon.png')} style={s.avatar} resizeMode="cover" />
+            <Image source={{ uri: avatarUrl }} style={s.avatar} resizeMode="cover" />
           </TouchableOpacity>
           <View style={s.headerRight}>
             <TouchableOpacity 
@@ -487,7 +716,6 @@ const HomeScreen = ({ navigation }) => {
               </Text>
             </TouchableOpacity>
 
-            {/* UPDATED WRAPPER TO BE CLICKABLE */}
             <TouchableOpacity 
               style={s.streakBadgeWrap}
               activeOpacity={0.8}
@@ -515,9 +743,17 @@ const HomeScreen = ({ navigation }) => {
 
         <View style={s.headerTextRow}>
           <View>
-            <Text style={s.greeting}>{getGreeting()}, Rohan.</Text>
-            <Text style={s.sub}>Ready to do the bare minimum?</Text>
+            <Text style={s.greetingText}>{getGreeting()},</Text>
+            <Text style={s.nameText}>{displayName}</Text>
           </View>
+        </View>
+
+        {/* ✅ Dynamic Quote Engine */}
+        <View style={s.quoteContainer}>
+          <Feather name="message-square" size={16} color="#D1D5DB" style={s.smallQuoteIcon} />
+          <Text style={s.quoteText}>
+            {currentQuote}
+          </Text>
         </View>
       </View>
 
@@ -532,18 +768,40 @@ const HomeScreen = ({ navigation }) => {
               Taking a break is part of the process. Your streaks are frozen and completely safe. Take this time to recharge your mind and body. You've earned it!
             </Text>
           </View>
+        ) : tasks.length === 0 ? (
+          // ★ BRAND NEW USER — no tasks exist yet
+          <View style={[s.emptyStateCard, { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }]}>
+            <View style={s.emptyIconRing}>
+              <MaterialCommunityIcons name="clipboard-text-play-outline" size={72} color="#94A3B8" style={{ marginBottom: 16 }} />
+            </View>
+            <Text style={s.emptyTitle}>Your Day is a Blank Canvas</Text>
+            <Text style={s.emptySubtitle}>
+              Great routines are built one habit at a time. Start small, stay consistent.
+            </Text>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => navigation.navigate('TaskList')}
+            >
+              <LinearGradient
+                colors={['#10B981', '#059669']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={s.emptyButton}
+              >
+                <Text style={s.emptyButtonText}>+ Build My Routine</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         ) : isDone ? (
+          // ★ ALL TASKS COMPLETED FOR TODAY
           <View style={[s.chillZoneCard, { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }]}>
-            <Text style={{ fontSize: 56, marginBottom: 16 }}>☕</Text>
+            <Text style={{ fontSize: 56, marginBottom: 16 }}>{completionInfo.icon}</Text>
             <Text style={[s.taskDesc, { marginBottom: 24, paddingHorizontal: 20 }]}>
-              {playfulMode
-                ? `Whoa, overachiever. You finished all your tasks for the day. Go touch grass.`
-                : `Great work. You are completely caught up for now.`}
+              {completionInfo.text}
             </Text>
           </View>
         ) : (
           <>
-            {/* Back Card */}
+            {/* ── BACK CARD (NEXT TASK) ── */}
             {nextTask && (
               <Animated.View style={[
                 s.taskCard,
@@ -551,16 +809,25 @@ const HomeScreen = ({ navigation }) => {
                 { transform: [{ scale: backCardScale }], opacity: backCardOpacity }
               ]}>
                 <View style={s.cardContent}>
-                  <Text style={{ fontSize: 64, marginBottom: 16 }}>{nextTask.icon}</Text>
+                  <Text style={{ fontSize: 64, marginBottom: 12 }}>{getTaskEmoji(nextTask.name)}</Text>
                   <Text style={s.taskName}>{nextTask.name}</Text>
-                  <Text style={s.taskDesc}>
-                    {playfulMode ? nextTask.descPlayful : nextTask.descProfessional}
+
+                  {/* The Clean Time Badge */}
+                  <View style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginBottom: 16 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#64748B' }}>
+                      ⏱️ {formatTime(nextTask.estimatedTime || 10)}
+                    </Text>
+                  </View>
+
+                  {/* The Funny / Professional Text (Forced to 1 Line) */}
+                  <Text style={s.taskDesc} numberOfLines={1} ellipsizeMode="tail">
+                    {playfulMode ? (nextTask.descPlayful || getFallbackDesc(nextTask.name, true)) : (nextTask.descProfessional || getFallbackDesc(nextTask.name, false))}
                   </Text>
                 </View>
               </Animated.View>
             )}
 
-            {/* Front Card */}
+            {/* ── FRONT CARD (CURRENT TASK) ── */}
             <Animated.View
               style={[
                 s.taskCard,
@@ -588,10 +855,19 @@ const HomeScreen = ({ navigation }) => {
                 </View>
               ) : (
                 <View style={s.cardContent}>
-                  <Text style={{ fontSize: 64, marginBottom: 16 }}>{task.icon}</Text>
+                  <Text style={{ fontSize: 64, marginBottom: 12 }}>{getTaskEmoji(task.name)}</Text>
                   <Text style={s.taskName}>{task.name}</Text>
-                  <Text style={s.taskDesc}>
-                    {playfulMode ? task.descPlayful : task.descProfessional}
+
+                  {/* The Clean Time Badge */}
+                  <View style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginBottom: 16 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#64748B' }}>
+                      ⏱️ {formatTime(task.estimatedTime || 10)}
+                    </Text>
+                  </View>
+
+                  {/* The Funny / Professional Text (Forced to 1 Line) */}
+                  <Text style={s.taskDesc} numberOfLines={1} ellipsizeMode="tail">
+                    {playfulMode ? (task.descPlayful || getFallbackDesc(task.name, true)) : (task.descProfessional || getFallbackDesc(task.name, false))}
                   </Text>
                 </View>
               )}
@@ -668,6 +944,8 @@ const HomeScreen = ({ navigation }) => {
             </View>
         </View>
       </View>
+
+      </ScrollView>
 
       <ShareBottomSheet
         visible={showShare}
@@ -757,10 +1035,34 @@ const s = StyleSheet.create({
   bellDot:         { position: 'absolute', top: 0, right: 0, width: 6, height: 6, borderRadius: 3, backgroundColor: '#E52200', shadowColor: '#E52200', shadowOpacity: 1, shadowRadius: 4, elevation: 4 },
 
   greeting: { fontSize: 32, fontWeight: '600', color: '#2D2B2E', marginBottom: 4 },
+  greetingText: { fontSize: 16, fontWeight: '500', color: '#6B7280' },
+  nameText: { fontSize: 28, fontWeight: '800', color: '#111827', letterSpacing: -0.5, marginTop: 4 },
   sub:       { fontSize: 14.33, color: '#2D2B2E', marginBottom: 0, fontWeight: '500' },
 
-  headerTextRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 },
+  headerTextRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginTop: 20 },
   infoIconWrap: { padding: 8, backgroundColor: '#F1F5F9', borderRadius: 20 },
+
+  quoteContainer: {
+    marginTop: 16,
+    marginBottom: 32,
+  },
+  smallQuoteIcon: {
+    marginBottom: 8,
+  },
+  quoteText: {
+    fontSize: 15,
+    fontStyle: 'italic',
+    color: '#4B5563',
+    lineHeight: 24,
+  },
+  quoteAuthor: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#9CA3AF',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginTop: 12,
+  },
 
   restHeaderBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, gap: 6 },
   restHeaderBtnActive: { backgroundColor: '#ECFDF5' },
@@ -784,7 +1086,7 @@ const s = StyleSheet.create({
 
   cardStack: { position: 'relative', marginBottom: 24, marginHorizontal: 20 },
   taskCard: {
-    height: 350,
+    height: '100%',
     backgroundColor: '#EFFFFA',
     borderRadius: 32,
     shadowColor: '#000',
@@ -795,9 +1097,9 @@ const s = StyleSheet.create({
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 32,
-    paddingBottom: 32,
-    paddingHorizontal: 20,
+    paddingTop: 40,
+    paddingBottom: 40,
+    paddingHorizontal: 24,
   },
 
   restStateContainer: {
@@ -858,7 +1160,7 @@ const s = StyleSheet.create({
   taskName:           { fontSize: 32, fontWeight: '600', color: '#2D2B2E', textAlign: 'center', marginBottom: 8 },
   taskDesc:           { fontSize: 14.33, color: '#2D2B2E', fontWeight: '300', textAlign: 'center', lineHeight: 22 },
 
-  actions:        { flexDirection: 'row', gap: 40, alignItems: 'center', justifyContent: 'center', paddingTop: 16 },
+  actions:        { flexDirection: 'row', gap: 48, alignItems: 'center', justifyContent: 'center', paddingTop: 24 },
   skipBtn:        { width: 64, height: 64, borderRadius: 32, backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#FFE2E2', alignItems: 'center', justifyContent: 'center', shadowColor: '#EF4444', shadowOpacity: 0.15, shadowRadius: 15, elevation: 2 },
   skipBtnPressed: { backgroundColor: '#FB2C36', borderColor: '#FB2C36' },
   skipIcon:       { fontSize: 24, color: '#FB2C36', fontWeight: '700' },
@@ -1062,6 +1364,54 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: '#D1FAE5',
   },
   allTimeFooterText: { fontSize: 13, color: '#10B981', fontWeight: '600', textAlign: 'center' },
+
+  // ★ EMPTY STATE (new user, no tasks yet)
+  emptyStateCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    padding: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.05,
+    shadowRadius: 20,
+    elevation: 3,
+  },
+  emptyIconRing: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#F0FDF4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1C1C1E',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptySubtitle: {
+    fontSize: 15,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+    paddingHorizontal: 10,
+  },
+  emptyButton: {
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 16,
+  },
+  emptyButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
 });
 
 const sh = StyleSheet.create({

@@ -7,18 +7,26 @@ import AppInput from '../components/AppInput';
 import AppButton from '../components/AppButton';
 import { useToast } from '../context/ToastContext';
 
-export default function NewPasswordScreen({ navigation }) {
+// ✅ 1. Import Firebase Auth
+import auth from '@react-native-firebase/auth';
+
+// ✅ 2. Add 'route' to your props to catch the deep link
+export default function NewPasswordScreen({ route, navigation }) {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
   const { showToast } = useToast();
+
+  // ✅ 3. Extract the secret code from the URL parameter
+  const oobCode = route?.params?.oobCode;
 
   // Dynamic validation checks
   const hasMinLength = newPassword.length >= 8;
   const hasUppercase = /[A-Z]/.test(newPassword);
   const hasNumber = /\d/.test(newPassword);
 
-  const handleSave = () => {
+  // ✅ 4. Make this function async
+  const handleSave = async () => {
     // 1. Check if empty
     if (!newPassword || !confirmPassword) {
       showToast("Missing Info", "Please fill out all fields.", "error");
@@ -34,10 +42,28 @@ export default function NewPasswordScreen({ navigation }) {
       showToast("Requirement", "Please meet all password requirements.", "warning");
       return;
     }
+    
+    // 4. Ensure we actually received a code from the email link
+    if (!oobCode) {
+      showToast("Error", "Missing reset code. Please click the link in your email again.", "error");
+      return;
+    }
 
-    // Success!
-    showToast("Success!", "Your new password has been set.", "success");
-    navigation.navigate('ProfileSettings'); 
+    // ✅ 5. The Magic Firebase Call
+    try {
+      // This tells Firebase to update the password using the code from the email
+      await auth().confirmPasswordReset(oobCode, newPassword);
+      
+      // Success!
+      showToast("Success!", "Your new password has been set.", "success");
+      
+      // Navigate them to Login so they can sign in with the new password
+      navigation.navigate('Login'); 
+    } catch (error) {
+      // If the code is expired or invalid, let them know
+      showToast("Link Expired", "This reset link is invalid or has expired.", "error");
+      console.error(error);
+    }
   };
 
   // Reusable component for the checklist rows
@@ -150,9 +176,8 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   inputWrapper: {
-    marginBottom: 16, // Slightly reduced to fit the checklist nicely
+    marginBottom: 16, 
   },
-  // --- Checklist Styles ---
   checksContainer: { 
     marginTop: 8, 
     marginBottom: 16,
@@ -171,7 +196,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '500'
   },
-  // -------------------------
   btnWrapper: {
     marginTop: 16, 
     marginBottom: 40 

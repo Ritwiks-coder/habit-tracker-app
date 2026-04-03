@@ -1,10 +1,13 @@
-import React, { useState, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, TextInput } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import AuthLayout from '../components/AuthLayout';
 import AppInput from '../components/AppInput';
 import AppButton from '../components/AppButton';
 import Svg, { Path } from 'react-native-svg';
 import { useToast } from '../context/ToastContext';
+
+// ✅ 1. Import Firebase Auth
+import auth from '@react-native-firebase/auth';
 
 const GoogleIcon = () => ( <Svg width="24" height="24" viewBox="0 0 24 24"><Path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><Path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><Path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><Path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></Svg> );
 const AppleIcon = () => ( <Svg width="24" height="24" viewBox="0 0 24 24"><Path fill="#000" d="M16.36 10.42c-.03-2.61 2.13-3.88 2.23-3.94-1.22-1.78-3.11-2.03-3.78-2.06-1.6-.16-3.13.94-3.95.94-.82 0-2.08-1-3.41-.97-1.73.03-3.32 1.01-4.2 2.56-1.79 3.1-.46 7.68 1.28 10.18.85 1.23 1.86 2.62 3.19 2.57 1.27-.06 1.77-.83 3.31-.83 1.54 0 2.01.83 3.33.8.1.01 2.21-2.48 3.06-3.71-.98-.56-2.06-1.63-2.06-3.34zM13.67 4.54c.71-.85 1.19-2.03 1.06-3.21-1.01.04-2.24.67-2.97 1.53-.65.76-1.2 1.97-1.04 3.12 1.12.08 2.24-.59 2.95-1.44z"/></Svg> );
@@ -12,55 +15,60 @@ const FacebookIcon = () => ( <Svg width="24" height="24" viewBox="0 0 24 24"><Pa
 
 export default function AuthForgotPasswordScreen({ navigation }) {
   const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
-  const inputs = useRef([]);
+  const [isLoading, setIsLoading] = useState(false);
   const { showToast } = useToast();
 
-  const handleOtpChange = (text, index) => {
-    const newOtp = [...otp];
-    newOtp[index] = text;
-    setOtp(newOtp);
-    if (text && index < 5) inputs.current[index + 1].focus();
+  // ✅ 2. The Link Sending Logic
+  const handleSendResetLink = async () => {
+    if (!email) {
+      showToast("Required", "Please enter your email.", "warning");
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const actionCodeSettings = {
+        url: 'https://google.com', 
+        handleCodeInApp: true, 
+        android: {
+          packageName: 'com.ritik.habittracker',
+          installApp: true,
+        },
+      };
+
+      await auth().sendPasswordResetEmail(email, actionCodeSettings);
+      
+      showToast("Success", "Reset link sent to your email!", "success");
+      navigation.navigate('Login'); // Go back to login after sending
+
+    } catch (error) {
+      showToast("Error", error.message, "error");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <AuthLayout
       title="Forget Password?"
-      subtitle="No worries! Enter your email and we'll send a reset link."
+      subtitle="No worries! Enter your email and we'll send a secure reset link."
       character={require('../assets/reset-char.png')} 
     >
-      <AppInput label="Gmail" placeholder="e.g. Taskmaster69@gmail.com" value={email} onChangeText={setEmail} />
+      <AppInput 
+        label="Gmail" 
+        placeholder="e.g. Taskmaster69@gmail.com" 
+        value={email} 
+        onChangeText={setEmail}
+        autoCapitalize="none"
+        keyboardType="email-address"
+      />
 
-      <TouchableOpacity style={styles.getOtpBtn} onPress={() => showToast("OTP Sent!", "Check your email inbox.", "info")}>
-        <Text style={styles.getOtpText}>Get OTP</Text>
-      </TouchableOpacity>
-
-      <Text style={styles.otpLabel}>OTP</Text>
-      <View style={styles.otpContainer}>
-        {otp.map((digit, index) => (
-          <TextInput
-            key={index}
-            style={styles.otpBox}
-            keyboardType="number-pad"
-            maxLength={1}
-            value={digit}
-            onChangeText={(text) => handleOtpChange(text, index)}
-            ref={(ref) => inputs.current[index] = ref}
-          />
-        ))}
-      </View>
-
-      <View style={{ marginTop: 24 }}>
+      <View style={{ marginTop: 32 }}>
         <AppButton 
-          title="Confirm" 
-          onPress={() => {
-            if (otp.join('').length === 6) {
-              // NO TOAST HERE! Just instantly navigate!
-              navigation.navigate('AuthResetPassword');
-            } else {
-              showToast("Required", "Please enter the full 6-digit OTP.", "warning");
-            }
-          }} 
+          title={isLoading ? "Sending..." : "Send Reset Link"} 
+          onPress={handleSendResetLink} 
+          disabled={isLoading}
         />
       </View>
 
@@ -78,11 +86,6 @@ export default function AuthForgotPasswordScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  getOtpBtn: { alignSelf: 'flex-end', backgroundColor: '#10B981', paddingVertical: 6, paddingHorizontal: 16, borderRadius: 12, marginTop: 4, marginBottom: 16 },
-  getOtpText: { color: '#FFF', fontSize: 12, fontWeight: '700' },
-  otpLabel: { fontSize: 14, color: '#374151', fontWeight: '500', marginBottom: 8 },
-  otpContainer: { flexDirection: 'row', justifyContent: 'space-between', width: '100%' },
-  otpBox: { width: 48, height: 56, borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 12, textAlign: 'center', fontSize: 20, fontWeight: '700', color: '#1F2937', backgroundColor: '#F9FAFB' },
   divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 30 },
   line: { flex: 1, height: 1, backgroundColor: '#D1FAE5' },
   or: { marginHorizontal: 12, color: '#9CA3AF', fontSize: 13 },

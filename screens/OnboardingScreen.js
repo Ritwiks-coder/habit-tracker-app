@@ -17,24 +17,24 @@ const { width, height } = Dimensions.get('window');
 const onboardingData = [
   {
     id: '1',
-    // FIX: Changed from ../assets to ./assets
-    image: require('./assets/onboard1.png'), 
+    // FIX: Reverted to ../assets
+    image: require('../assets/onboard1.png'), 
     title: 'Hey there! 👋',
     description: "Let's make your day a little more productive.",
     imageStyle: 'large',
   },
   {
     id: '2',
-    // FIX: Changed from ../assets to ./assets
-    image: require('./assets/onboard2.png'), 
+    // FIX: Reverted to ../assets
+    image: require('../assets/onboard2.png'), 
     title: 'Focus mode: ON 🎯',
     description: 'Add tasks, stay focused, and crush them one by one.',
     imageStyle: 'circle',
   },
   {
     id: '3',
-    // FIX: Changed from ../assets to ./assets
-    image: require('./assets/onboard3.png'), 
+    // FIX: Reverted to ../assets
+    image: require('../assets/onboard3.png'), 
     title: 'Winning feels good! 🏆',
     description: 'Finish tasks, earn points, and enjoy being on top.',
     imageStyle: 'circle',

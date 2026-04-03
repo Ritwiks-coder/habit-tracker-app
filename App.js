@@ -1,20 +1,30 @@
 import 'react-native-gesture-handler';
-import React, { useRef } from 'react';
+// ✅ 1. Added useState and useEffect here
+import React, { useRef, useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+// ✅ 2. Added ActivityIndicator here
+import { View, TouchableOpacity, StyleSheet, Animated, ActivityIndicator } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { Feather } from '@expo/vector-icons';
 
+import * as Linking from 'expo-linking';
+
+// ✅ 3. Added Firebase Auth here
+import auth from '@react-native-firebase/auth';
+
 import { AppProvider, useApp } from './context/AppContext';
 import { ToastProvider } from './context/ToastContext';
+import Toast from 'react-native-toast-message';
+import { toastConfig } from './components/ToastConfig';
 import Sidebar from './components/Sidebar';
 import { navigationRef } from './services/NavigationService';
 
 // -- Personal App screens --
-import OnboardingScreen from './OnboardingScreen';
-import LoginScreen from './LoginScreen';
+import OnboardingScreen from './screens/OnboardingScreen';
+import LoginScreen from './screens/LoginScreen';
+import SignUpScreen from './screens/SignUpScreen';
 import AuthForgotPasswordScreen from './screens/AuthForgotPasswordScreen';
 import AuthResetPasswordScreen from './screens/ResetPasswordScreen';
 import HomeScreen from './screens/HomeScreen';
@@ -128,48 +138,109 @@ const BusinessTabNavigator = () => (
   </Tab.Navigator>
 );
 
-
 // ==========================================
 // 3. MAIN APP STACK (Roots)
 // ==========================================
 const MainApp = () => {
   const { sidebarOpen, setSidebarOpen, businessSidebarOpen, setBusinessSidebarOpen } = useApp();
+  
+  // ✅ 4. Initialize Auth States
+  const [initializing, setInitializing] = useState(true);
+  const [user, setUser] = useState(null);
+
+  // ✅ 5. The Firebase Session Listener
+  useEffect(() => {
+    const subscriber = auth().onAuthStateChanged((userState) => {
+      setUser(userState);
+      if (initializing) setInitializing(false);
+    });
+    return subscriber; // unsubscribe on unmount
+  }, [initializing]);
+
+  const prefix = Linking.createURL('/');
+  
+  const linking = {
+    prefixes: [prefix, 'habittracker://', 'exp+habittracker://'],
+    config: {
+      screens: {
+        NewPassword: 'reset', 
+      },
+    },
+  };
+
+  // ✅ 6. Show loading screen while Firebase checks session
+  if (initializing) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8F9FA' }}>
+        <ActivityIndicator size="large" color="#10B981" />
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1 }}>
-      <NavigationContainer ref={navigationRef}>
+      <NavigationContainer ref={navigationRef} linking={linking}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="AuthForgotPassword" component={AuthForgotPasswordScreen} />
-          <Stack.Screen name="AuthResetPassword" component={AuthResetPasswordScreen} />
-          <Stack.Screen name="Main" component={TabNavigator} />
-          <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
-          <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
-          <Stack.Screen name="ProfileForgotPassword" component={ProfileForgotPasswordScreen} />
-          <Stack.Screen name="NewPassword" component={NewPasswordScreen} />
-          <Stack.Screen name="DiscountCenter" component={DiscountCenterScreen} />
-          <Stack.Screen name="Notifications" component={NotificationsScreen} />
-          <Stack.Screen name="BusinessRegister" component={BusinessRegisterScreen} />
-          <Stack.Screen name="BusinessLogin" component={BusinessLoginScreen} />
-          <Stack.Screen name="BusinessForgotPassword" component={BusinessForgotPasswordScreen} />
-          <Stack.Screen name="BusinessResetPassword" component={BusinessResetPasswordScreen} />
-          <Stack.Screen name="BusinessSelectAccount" component={BusinessSelectAccountScreen} />
-          <Stack.Screen name="AddNewBusiness" component={AddNewBusinessScreen} />
-          <Stack.Screen name="BusinessNotifications" component={BusinessNotificationsScreen} />
-          <Stack.Screen name="BusinessStore" component={BusinessStoreScreen} />
-          <Stack.Screen name="BusinessTransaction" component={BusinessTransactionScreen} />
-          <Stack.Screen name="BusinessTabs" component={BusinessTabNavigator} />
-          <Stack.Screen name="BusinessSupport" component={BusinessSupportScreen} options={{ headerShown: false }} />
+          
+          {/* ✅ 7. Conditional Rendering based on Auth State */}
+          {user ? (
+            // IF LOGGED IN: Show Main App
+            <>
+              <Stack.Screen name="Main" component={TabNavigator} />
+              <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
+              <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
+              <Stack.Screen name="ProfileForgotPassword" component={ProfileForgotPasswordScreen} />
+              <Stack.Screen name="NewPassword" component={NewPasswordScreen} />
+              <Stack.Screen name="DiscountCenter" component={DiscountCenterScreen} />
+              <Stack.Screen name="Notifications" component={NotificationsScreen} />
+              <Stack.Screen name="BusinessRegister" component={BusinessRegisterScreen} />
+              <Stack.Screen name="BusinessSelectAccount" component={BusinessSelectAccountScreen} />
+              <Stack.Screen name="AddNewBusiness" component={AddNewBusinessScreen} />
+              <Stack.Screen name="BusinessNotifications" component={BusinessNotificationsScreen} />
+              <Stack.Screen name="BusinessStore" component={BusinessStoreScreen} />
+              <Stack.Screen name="BusinessTransaction" component={BusinessTransactionScreen} />
+              <Stack.Screen name="BusinessTabs" component={BusinessTabNavigator} />
+              <Stack.Screen name="BusinessSupport" component={BusinessSupportScreen} />
+            </>
+          ) : (
+            // IF NOT LOGGED IN: Show Auth Flow
+            <>
+              <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+              <Stack.Screen name="Login" component={LoginScreen} />
+              <Stack.Screen name="SignUp" component={SignUpScreen} />
+              <Stack.Screen name="AuthForgotPassword" component={AuthForgotPasswordScreen} />
+              <Stack.Screen name="AuthResetPassword" component={AuthResetPasswordScreen} />
+              <Stack.Screen name="BusinessLogin" component={BusinessLoginScreen} />
+              <Stack.Screen name="BusinessForgotPassword" component={BusinessForgotPasswordScreen} />
+              <Stack.Screen name="BusinessResetPassword" component={BusinessResetPasswordScreen} />
+            </>
+          )}
+
         </Stack.Navigator>
       </NavigationContainer>
-      <Sidebar visible={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <BusinessSidebar visible={businessSidebarOpen} onClose={() => setBusinessSidebarOpen(false)} />
+      
+      {/* Sidebar only renders if logged in */}
+      {user && (
+        <>
+          <Sidebar visible={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+          <BusinessSidebar visible={businessSidebarOpen} onClose={() => setBusinessSidebarOpen(false)} />
+        </>
+      )}
     </View>
   );
 };
 
 export default function App() {
-  return <AppProvider><ToastProvider><MainApp /></ToastProvider></AppProvider>;
+  return (
+    <View style={{ flex: 1 }}>
+      <AppProvider>
+        <ToastProvider>
+          <MainApp />
+        </ToastProvider>
+        <Toast config={toastConfig} autoHide={false} />
+      </AppProvider>
+    </View>
+  );
 }
 
 // ==========================================
