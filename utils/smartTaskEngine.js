@@ -49,11 +49,15 @@ export const analyzeTask = (taskName) => {
  * @returns {string} e.g., "5 min", "1 hr", "1.5 hrs"
  */
 export const formatTime = (minutes) => {
+  if (!minutes || isNaN(minutes)) {
+    return "Quick Task";
+  }
   if (minutes < 60) {
     return `${minutes} min`;
   }
-  const hours = minutes / 60;
-  return hours % 1 === 0 ? `${hours} hr` : `${hours.toFixed(1)} hrs`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
 };
 
 /**

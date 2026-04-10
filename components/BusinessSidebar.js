@@ -167,7 +167,7 @@ export default function BusinessSidebar({ visible, onClose }) {
             <Image source={{uri: 'https://images.unsplash.com/photo-1511367461989-f85a21fda167?q=80&w=200&auto=format&fit=crop'}} style={s.avatar} />
             <Text style={s.name}>Business Name</Text>
             <View style={s.pointsBadge}>
-              <Text style={s.pointsText}>🔥 850 PTS</Text>
+              <Text style={s.pointsText}>🪙 850 COINS</Text>
             </View>
           </View>
 

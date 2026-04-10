@@ -26,7 +26,7 @@ export const FacebookIcon = () => (
   </Svg>
 );
 
-const SocialButtons = () => (
+const SocialButtons = ({ onGooglePress, onApplePress, onFacebookPress }) => (
   <View>
     <View style={s.divider}>
       <View style={s.line} />
@@ -34,9 +34,15 @@ const SocialButtons = () => (
       <View style={s.line} />
     </View>
     <View style={s.row}>
-      <TouchableOpacity style={s.btn}><GoogleIcon /></TouchableOpacity>
-      <TouchableOpacity style={s.btn}><AppleIcon /></TouchableOpacity>
-      <TouchableOpacity style={s.btn}><FacebookIcon /></TouchableOpacity>
+      <TouchableOpacity style={s.btn} onPress={onGooglePress} activeOpacity={0.7}>
+        <GoogleIcon />
+      </TouchableOpacity>
+      <TouchableOpacity style={s.btn} onPress={onApplePress} activeOpacity={0.7}>
+        <AppleIcon />
+      </TouchableOpacity>
+      <TouchableOpacity style={s.btn} onPress={onFacebookPress} activeOpacity={0.7}>
+        <FacebookIcon />
+      </TouchableOpacity>
     </View>
   </View>
 );

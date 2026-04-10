@@ -7,6 +7,7 @@ import Svg, { Path, Rect, G, ClipPath, Defs } from 'react-native-svg';
 import { useApp } from '../context/AppContext';
 import { navigationRef } from '../services/NavigationService';
 import LogoutModal from './LogoutModal';
+import ShopSection from './ShopSection';
 
 // THE ONLY FIREBASE IMPORT YOU NEED
 import auth from '@react-native-firebase/auth';
@@ -117,7 +118,7 @@ const PressRow = ({ icon, title, subtitle, onPress, green, hasBadge }) => (
 const Sidebar = ({ visible, onClose }) => {
   // ✅ 1. Pull BOTH user and userProfile from useApp for bulletproof fallbacks
   const { 
-    user, userProfile, points, playfulMode, setPlayfulMode, 
+    user, userProfile, points, coins, playfulMode, setPlayfulMode, 
     sidebarOpen, setSidebarOpen, ghostMode, setGhostMode 
   } = useApp();
   
@@ -199,7 +200,7 @@ const Sidebar = ({ visible, onClose }) => {
               {/* ✅ Updated to use extracted name */}
               <Text style={s.name}>{displayName}</Text>
               <View style={s.pointsBadge}>
-                <Text style={s.pointsText}>🔥 {points || 0} PTS</Text>
+                <Text style={s.pointsText}>🪙 {coins || 0} COINS</Text>
               </View>
             </View>
           </View>
@@ -238,7 +239,7 @@ const Sidebar = ({ visible, onClose }) => {
             onPress={() => goTo('DiscountCenter')}
           />
 
-          {/* BUSINESS */}
+          {/* BUSINESS - HIDDEN FOR V1 
           <Text style={s.sectionTitle}>BUSINESS</Text>
           <PressRow
             icon={<HomeIcon />}
@@ -247,6 +248,7 @@ const Sidebar = ({ visible, onClose }) => {
             green
             onPress={() => goTo('BusinessRegister')} 
           />
+          */}
 
           <View style={{ flex: 1, minHeight: 40 }} />
           <View style={s.divider} />

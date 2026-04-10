@@ -53,8 +53,6 @@ export default function ResetPasswordScreen({ navigation }) {
               
               // YOUR NEW TEXT IS HERE!
               showToast("Password Updated!", "Your password has been changed.", "success");
-              
-              navigation.navigate('Main'); 
             } else {
               showToast("Almost there", "Please meet all password requirements.", "warning");
             }
@@ -69,7 +67,7 @@ export default function ResetPasswordScreen({ navigation }) {
       </View>
 
       <TouchableOpacity 
-        onPress={() => navigation.navigate('Main')} 
+        onPress={() => {}} 
         style={s.skipButtonWrap}
       >
         <Text style={s.skipText}>I'll do it later</Text>

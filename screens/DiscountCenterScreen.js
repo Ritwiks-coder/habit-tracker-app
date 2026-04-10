@@ -5,10 +5,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Feather } from '@expo/vector-icons'; 
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons'; 
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext'; 
 import MerchantProfileModal from '../components/MerchantProfileModal';
+import theme from '../src/theme/theme';
 
 const { width, height } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48 - 16) / 2;
@@ -55,10 +56,11 @@ const HISTORY = [
 ];
 
 export default function DiscountCenterScreen({ navigation }) {
-  const { points } = useApp();
+  const { coins, spendCoins, playfulMode } = useApp();
   const { showToast } = useToast();
 
-  const [activeTab, setActiveTab] = useState('All');
+  const [activeTab, setActiveTab] = useState('Coupons');
+  const tabs = ['Coupons', 'History'];
   
   const [tooltipVisible, setTooltipVisible] = useState(false);
   const [activeRewardId, setActiveRewardId] = useState(null);
@@ -67,12 +69,10 @@ export default function DiscountCenterScreen({ navigation }) {
   const [isDescExpanded, setIsDescExpanded] = useState(false); 
   const [selectedToBuy, setSelectedToBuy] = useState(null);
 
-  // 👉 NEW: Track Purchases & QR Modal
-  const [purchasedCoupons, setPurchasedCoupons] = useState(['3']); // Mocking that ID 3 is already purchased
+  const [purchasedCoupons, setPurchasedCoupons] = useState(['3']);
   const [qrModalVisible, setQrModalVisible] = useState(false);
   const [selectedQrReward, setSelectedQrReward] = useState(null);
 
-  // 👉 NEW: Merchant Profile Modal State
   const [merchantModalVisible, setMerchantModalVisible] = useState(false);
   const [selectedMerchant, setSelectedMerchant] = useState(null);
 
@@ -106,9 +106,14 @@ export default function DiscountCenterScreen({ navigation }) {
   };
 
   const confirmPurchase = () => {
-    setDetailModalVisible(false);
+    if (coins < selectedToBuy.price) {
+      showToast("Insufficient Balance", "You need more coins to buy this reward.", "error");
+      return;
+    }
     
-    // 👉 NEW: Add to purchased list to lock out duplicates
+    spendCoins(selectedToBuy.price);
+    
+    setDetailModalVisible(false);
     setPurchasedCoupons(prev => [...prev, selectedToBuy.id]);
     showToast("Reward Claimed!", `You can now use your ${selectedToBuy.title}`, "success");
   };
@@ -121,341 +126,172 @@ export default function DiscountCenterScreen({ navigation }) {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Check out this reward: ${selectedToBuy?.title} for only ${selectedToBuy?.price} points on HabitTracker! ☕✨`,
+        message: `Check out this reward: ${selectedToBuy?.title} for only ${selectedToBuy?.price} coins on HabitTracker! ☕✨`,
       });
-    } catch (error) {}
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
       
       <View style={s.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-          <Feather name="chevron-left" size={28} color="#1F2937" />
-        </TouchableOpacity>
-        <Text style={s.headerTitle}>Discount Center</Text>
-        <View style={{ width: 28 }} />
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
+            <Feather name="chevron-left" size={28} color={theme.colors.textPrimary} />
+          </TouchableOpacity>
+          <Text style={s.headerTitle}>Rewards Hub</Text>
+        </View>
       </View>
 
-      <ScrollView 
-        showsVerticalScrollIndicator={false} 
-        contentContainerStyle={s.scrollContent}
-        onScrollBeginDrag={() => setTooltipVisible(false)} 
-      >
-        
-        <LinearGradient colors={['#22C55E', '#10B981']} style={s.balanceCard}>
-          <Text style={s.balanceLabel}>MY BALANCE</Text>
-          <View style={s.balanceAmountRow}>
-            <Text style={s.balancePoints}>{points.toLocaleString()}</Text>
-            <Text style={s.balanceUnit}>pts</Text>
-          </View>
-        </LinearGradient>
-
-        <View style={s.tabContainer}>
-          {['All', 'History'].map(tab => (
-            <TouchableOpacity 
-              key={tab}
-              style={[s.tabBtn, activeTab === tab && s.tabBtnActive]}
-              onPress={() => {setActiveTab(tab); setTooltipVisible(false);}}
-            >
-              <Text style={[s.tabText, activeTab === tab && s.tabTextActive]}>{tab}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {activeTab === 'All' ? (
-          <View style={s.allSection}>
-            <Text style={s.sectionTitle}>Available Rewards</Text>
-            <Text style={s.sectionSubtitle}>Redeem your points for exclusive discounts</Text>
-
-            <View style={s.gridContainer}>
-              {REWARDS.map((reward) => {
-                
-                // 👉 NEW: Check if user owns this specific coupon
-                const isPurchased = purchasedCoupons.includes(reward.id) || reward.state === 'active';
-
-                return (
-                  <View key={reward.id} style={s.rewardCard}>
-                    <Image source={{ uri: reward.image }} style={s.rewardImg} />
-                    
-                    <View style={s.rewardContent}>
-                      
-                      {/* Merchant Trigger */}
-                      {reward.merchant && (
-                        <TouchableOpacity 
-                          style={s.merchantRow} 
-                          onPress={() => openMerchantProfile(reward.merchant)}
-                          activeOpacity={0.8}
-                        >
-                          <Image source={{ uri: Math.random() < 0.5 ? reward.merchant.logo : reward.merchant.logo }} style={s.merchantLogoSmall} />
-                          <Text style={s.merchantNameSmall} numberOfLines={1}>{reward.merchant.name}</Text>
-                        </TouchableOpacity>
-                      )}
-
-                      <Text style={s.rTitle}>{reward.title}</Text>
-                      
-                      <View style={s.rDescRow}>
-                        <Text style={s.rDesc} numberOfLines={1}>{reward.desc}</Text>
-                        <TouchableOpacity onPress={() => toggleTooltip(reward.id)}>
-                          <Feather name="info" size={14} color="#10B981" />
-                        </TouchableOpacity>
-                      </View>
-
-                      {tooltipVisible && activeRewardId === reward.id && (
-                        <View style={s.tooltipBubble}>
-                          <Text style={s.tooltipText}>Limit 1 per user per day. Redeem at counter.</Text>
-                          <View style={s.tooltipArrow} />
-                        </View>
-                      )}
-
-                      <Text style={[s.rExp, reward.expColor && { color: reward.expColor }]}>
-                        {reward.expText}
-                      </Text>
-
-                      {/* 👉 NEW: Hide code with asterisks if not purchased yet */}
-                      <TouchableOpacity 
-                        onPress={() => handleCopyCode(reward.code, isPurchased)}
-                        style={[s.codeBox, reward.state === 'expired' ? s.codeBoxExpired : s.codeBoxActive]}
-                      >
-                        <Text style={[s.codeText, reward.state === 'expired' ? s.codeTextExpired : s.codeTextActive]}>
-                          {isPurchased ? reward.code : '******'}
-                        </Text>
-                        {isPurchased && reward.state !== 'expired' && <Feather name="copy" size={12} color="#10B981" style={{marginLeft: 4}} />}
-                      </TouchableOpacity>
-
-                      {/* 👉 NEW: Swap Buy Button for QR Button if purchased */}
-                      <TouchableOpacity 
-                        style={[
-                          s.actionBtn, 
-                          reward.state === 'expired' ? s.actionBtnExpired : s.actionBtnActive,
-                          isPurchased && reward.state !== 'expired' && s.actionBtnPurchased
-                        ]}
-                        onPress={() => {
-                          if (reward.state === 'expired') return;
-                          if (isPurchased) {
-                            openQrScanner(reward);
-                          } else {
-                            handleRewardClick(reward);
-                          }
-                        }}
-                        activeOpacity={0.8}
-                      >
-                        {isPurchased && reward.state !== 'expired' ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <Feather name="maximize" size={14} color="#FFFFFF" />
-                            <Text style={s.actionBtnText}>Show QR</Text>
-                          </View>
-                        ) : (
-                          <Text style={[s.actionBtnText, reward.state === 'expired' && s.actionBtnTextExpired]}>
-                            {reward.state === 'expired' ? 'Expired' : `Buy - ${reward.price} pts`}
-                          </Text>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                );
-              })}
+      <View style={{ flex: 1 }}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scrollContent}>
+          <LinearGradient 
+            colors={[theme.palette.green500, theme.palette.green600]} 
+            style={s.balanceCard}
+          >
+            <Text style={s.balanceLabel}>MY COIN BALANCE</Text>
+            <View style={s.balanceAmountRow}>
+              <Text style={s.balancePoints}>🪙 {coins.toLocaleString()}</Text>
             </View>
-          </View>
-        ) : (
-           <View style={s.historySection}>
-            {HISTORY.map((group, gIdx) => (
-              <View key={gIdx} style={s.historyGroup}>
-                <Text style={s.historyMonthLabel}>{group.month}</Text>
-                {group.items.map((item) => {
-                  const isEarn = item.type === 'earn';
-                  return (
-                    <View key={item.id} style={s.historyRow}>
-                      <View style={[s.historyIconBox, { backgroundColor: isEarn ? '#E8F8F2' : '#FEE2E2' }]}>
-                        <Feather name={item.icon} size={18} color={isEarn ? '#10B981' : '#EF4444'} />
-                      </View>
-                      <View style={s.historyTextWrap}>
-                        <Text style={s.historyTitle}>{item.title}</Text>
-                        <Text style={s.historyDate}>{item.date}</Text>
-                      </View>
-                      <Text style={[s.historyPoints, { color: isEarn ? '#10B981' : '#EF4444' }]}>
-                        {item.points}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
-            ))}
-          </View>
-        )}
-      </ScrollView>
+          </LinearGradient>
 
-      {/* --- BIG DETAILED CARD MODAL --- */}
+          <View style={s.vaultContainer}>
+            <Text style={s.vaultIcon}>🏦</Text>
+            <Text style={s.vaultTitle}>The Vault is Closed.</Text>
+            <Text style={s.vaultSubtitle}>
+              We're partnering with local spots. Keep hoarding those coins for real-world rewards!
+            </Text>
+          </View>
+        </ScrollView>
+      </View>
+
+      {/* --- MODALS --- */}
       <Modal transparent visible={detailModalVisible} animationType="fade">
         <View style={s.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setDetailModalVisible(false)} />
           <View style={s.detailCard}>
-            
             <View style={s.detailImageWrap}>
               <Image source={{ uri: selectedToBuy?.image }} style={s.detailImage} />
               <TouchableOpacity style={s.shareBtnTop} onPress={handleShare} activeOpacity={0.8}>
-                <Feather name="share-2" size={20} color="#10B981" />
+                <Feather name="share-2" size={20} color={theme.palette.green500} />
               </TouchableOpacity>
               <TouchableOpacity style={s.closeBtnTop} onPress={() => setDetailModalVisible(false)} activeOpacity={0.8}>
-                <Feather name="x" size={20} color="#6B7280" />
+                <Feather name="x" size={20} color={theme.colors.textSecondary} />
               </TouchableOpacity>
             </View>
-
             <View style={s.detailContent}>
               <Text style={s.detailTitle}>{selectedToBuy?.title}</Text>
-              <ScrollView style={{ maxHeight: isDescExpanded ? 180 : 65 }} showsVerticalScrollIndicator={false}>
-                <Text style={s.detailDesc} numberOfLines={isDescExpanded ? undefined : 3}>
-                  {LONG_DUMMY_DESC}
-                </Text>
+              <ScrollView style={{ maxHeight: 180 }} showsVerticalScrollIndicator={false}>
+                <Text style={s.detailDesc}>{LONG_DUMMY_DESC}</Text>
               </ScrollView>
-              <TouchableOpacity style={s.readMoreBtn} onPress={() => setIsDescExpanded(!isDescExpanded)} activeOpacity={0.7}>
-                <Text style={s.readMoreText}>{isDescExpanded ? 'Show Less' : 'Read More...'}</Text>
-              </TouchableOpacity>
-
               <TouchableOpacity style={s.detailBuyBtn} onPress={confirmPurchase} activeOpacity={0.85}>
-                <Text style={s.detailBuyText}>Buy - {selectedToBuy?.price} pts</Text>
+                <Text style={s.detailBuyText}>🪙 Spend {selectedToBuy?.price} Coins</Text>
               </TouchableOpacity>
             </View>
-
           </View>
         </View>
       </Modal>
 
-      {/* 👉 NEW: QR CODE MODAL */}
       <Modal transparent visible={qrModalVisible} animationType="fade" statusBarTranslucent>
         <View style={s.modalOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setQrModalVisible(false)} />
           <View style={s.qrCard}>
-            
             <View style={s.qrHeader}>
               <View style={s.qrIconWrap}>
-                <Feather name="check-circle" size={24} color="#10B981" />
+                <Feather name="check-circle" size={24} color={theme.palette.green500} />
               </View>
               <Text style={s.qrTitle}>Ready to Redeem</Text>
               <Text style={s.qrSub}>Show this code to the cashier</Text>
             </View>
-
-            {/* Generates a real QR Code using a free public API! */}
             <View style={s.qrImageWrap}>
               <Image 
                 source={{ uri: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${selectedQrReward?.code}` }} 
                 style={s.qrImage} 
               />
             </View>
-
             <View style={s.qrCodeBox}>
               <Text style={s.qrCodeLabel}>OR PROVIDE CODE</Text>
               <Text style={s.qrCodeValue}>{selectedQrReward?.code}</Text>
             </View>
-
             <TouchableOpacity style={s.qrCloseBtn} onPress={() => setQrModalVisible(false)}>
               <Text style={s.qrCloseBtnText}>Close</Text>
             </TouchableOpacity>
-            
           </View>
         </View>
       </Modal>
-
-      {/* 👉 NEW: MERCHANT PROFILE MODAL */}
-      <MerchantProfileModal 
-        visible={merchantModalVisible} 
-        onClose={() => setMerchantModalVisible(false)} 
-        merchant={selectedMerchant} 
-      />
+      <MerchantProfileModal visible={merchantModalVisible} onClose={() => setMerchantModalVisible(false)} merchant={selectedMerchant} />
 
     </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#F9FAFB' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 60, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  backBtn: { padding: 4 },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: '#1F2937' },
-  scrollContent: { paddingVertical: 20 },
-  balanceCard: { marginHorizontal: 24, borderRadius: 16, padding: 24, marginBottom: 24 },
-  balanceLabel: { fontSize: 11, fontWeight: '700', color: '#FFFFFF', opacity: 0.8, letterSpacing: 1 },
-  balanceAmountRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 4 },
-  balancePoints: { fontSize: 38, fontWeight: '800', color: '#FFFFFF' },
-  balanceUnit: { fontSize: 16, color: '#FFFFFF', marginLeft: 4, fontWeight: '600' },
-  tabContainer: { flexDirection: 'row', paddingHorizontal: 24, gap: 10, marginBottom: 20 },
-  tabBtn: { flex: 1, paddingVertical: 10, borderRadius: 20, backgroundColor: '#FFFFFF', alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
-  tabBtnActive: { backgroundColor: '#10B981', borderColor: '#10B981' },
-  tabText: { fontWeight: '600', color: '#6B7280', fontSize: 14 },
-  tabTextActive: { color: '#FFFFFF' },
+  safe: { flex: 1, backgroundColor: theme.colors.background },
+  header: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between', 
+    paddingHorizontal: theme.spacing.md, 
+    height: 70, 
+    backgroundColor: theme.colors.surface 
+  },
+  backBtn: { padding: 4, marginRight: 8 },
+  headerTitle: { ...theme.typography.h1, color: theme.colors.textPrimary },
   
-  allSection: { paddingHorizontal: 24 },
-  sectionTitle: { fontSize: 18, fontWeight: '800', color: '#1F2937' },
-  sectionSubtitle: { fontSize: 13, color: '#6B7280', marginBottom: 16 },
-  gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  
-  rewardCard: { width: CARD_WIDTH, backgroundColor: '#FFFFFF', borderRadius: 16, marginBottom: 16, elevation: 3, zIndex: 1 },
-  rewardImg: { width: '100%', height: 110, borderTopLeftRadius: 16, borderTopRightRadius: 16 },
-  rewardContent: { padding: 12, position: 'relative' },
-  
-  merchantRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-  merchantLogoSmall: { width: 16, height: 16, borderRadius: 8, marginRight: 6, backgroundColor: '#E2E8F0' },
-  merchantNameSmall: { fontSize: 11, fontWeight: '700', color: '#6B7280', flex: 1 },
+  scrollContent: { paddingBottom: theme.spacing.xxl },
+  balanceCard: { 
+    marginHorizontal: theme.spacing.lg, 
+    borderRadius: theme.radius.md, 
+    padding: theme.spacing.lg, 
+    marginBottom: theme.spacing.lg, 
+    ...theme.shadow.md,
+    shadowColor: theme.colors.success 
+  },
+  balanceLabel: { 
+    ...theme.typography.caption, 
+    fontWeight: '800', 
+    color: theme.colors.textOnDark, 
+    opacity: 0.9, 
+    letterSpacing: 1 
+  },
+  balanceAmountRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 6 },
+  balancePoints: { fontSize: 42, fontWeight: '900', color: '#FFFFFF' },
 
-  rTitle: { fontSize: 14, fontWeight: '800', color: '#1F2937' },
-  rDescRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 4 },
-  rDesc: { fontSize: 10, color: '#6B7280', flex: 1 },
-  rExp: { fontSize: 10, color: '#9CA3AF', marginBottom: 8, fontWeight: '500' },
-  
-  tooltipBubble: { position: 'absolute', top: -45, right: 0, backgroundColor: '#FFFFFF', padding: 10, borderRadius: 12, width: 150, zIndex: 999, borderWidth: 1, borderColor: '#F3F4F6', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
-  tooltipText: { color: '#4B5563', fontSize: 10, lineHeight: 14, fontWeight: '500' },
-  tooltipArrow: { position: 'absolute', bottom: -6, right: 12, width: 0, height: 0, borderLeftWidth: 6, borderRightWidth: 6, borderTopWidth: 6, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: '#FFFFFF' },
+  vaultContainer: { 
+    flex: 1, 
+    paddingHorizontal: theme.spacing.xxl, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    paddingTop: 80 
+  },
+  vaultIcon: { fontSize: 64, marginBottom: theme.spacing.lg },
+  vaultTitle: { ...theme.typography.h2, color: theme.colors.textPrimary, textAlign: 'center', marginBottom: theme.spacing.sm },
+  vaultSubtitle: { ...theme.typography.body, color: theme.colors.textSecondary, textAlign: 'center', paddingHorizontal: 10 },
 
-  codeBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 6, borderRadius: 8, borderStyle: 'dashed', borderWidth: 1, marginBottom: 8 },
-  codeBoxActive: { backgroundColor: '#F0FDF4', borderColor: '#10B981' },
-  codeBoxExpired: { backgroundColor: '#F9FAFB', borderColor: '#D1D5DB' },
-  codeText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
-  codeTextActive: { color: '#10B981' },
-  codeTextExpired: { color: '#9CA3AF' },
-  
-  actionBtn: { paddingVertical: 8, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  actionBtnActive: { backgroundColor: '#10B981' },
-  actionBtnPurchased: { backgroundColor: '#059669' }, // Darker green to show it's owned
-  actionBtnExpired: { backgroundColor: '#E5E7EB' },
-  actionBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
-  actionBtnTextExpired: { color: '#9CA3AF' },
-
-  historySection: { paddingHorizontal: 24 },
-  historyGroup: { marginBottom: 24 },
-  historyMonthLabel: { fontSize: 11, fontWeight: '800', color: '#9CA3AF', letterSpacing: 1, marginBottom: 16 },
-  historyRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
-  historyIconBox: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginRight: 14 },
-  historyTextWrap: { flex: 1, justifyContent: 'center' },
-  historyTitle: { fontSize: 15, fontWeight: '700', color: '#1F2937', marginBottom: 2 },
-  historyDate: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
-  historyPoints: { fontSize: 16, fontWeight: '800' },
-
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 24 },
-  
-  detailCard: { width: '100%', maxWidth: 380, backgroundColor: '#FFFFFF', borderRadius: 24, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 10, maxHeight: height * 0.85 },
-  detailImageWrap: { height: 220, position: 'relative' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.7)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  detailCard: { width: '100%', maxWidth: 400, backgroundColor: theme.colors.surface, borderRadius: theme.radius.lg, overflow: 'hidden' },
+  detailImageWrap: { height: 260, position: 'relative' },
   detailImage: { width: '100%', height: '100%' },
-  shareBtnTop: { position: 'absolute', top: 16, right: 16, width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', elevation: 5 },
-  closeBtnTop: { position: 'absolute', top: 16, left: 16, width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', elevation: 5 },
-  detailContent: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 24, alignItems: 'center' },
-  detailTitle: { fontSize: 24, fontWeight: '800', color: '#1F2937', marginBottom: 12 },
-  detailDesc: { fontSize: 14, color: '#6B7280', textAlign: 'center', lineHeight: 22 },
-  readMoreBtn: { marginTop: 4, marginBottom: 24, paddingVertical: 4 },
-  readMoreText: { fontWeight: '700', color: '#10B981', fontSize: 14 },
-  detailBuyBtn: { backgroundColor: '#10B981', width: '100%', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
-  detailBuyText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  shareBtnTop: { position: 'absolute', top: 20, right: 20, width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', ...theme.shadow.sm },
+  closeBtnTop: { position: 'absolute', top: 20, left: 20, width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', ...theme.shadow.sm },
+  detailContent: { padding: 28, alignItems: 'center' },
+  detailTitle: { ...theme.typography.h2, color: theme.colors.textPrimary, marginBottom: 16, textAlign: 'center' },
+  detailDesc: { ...theme.typography.body, color: theme.colors.textSecondary, textAlign: 'center', marginBottom: 28 },
+  detailBuyBtn: { backgroundColor: theme.palette.green600, width: '100%', paddingVertical: 18, borderRadius: theme.radius.md, alignItems: 'center', ...theme.shadow.sm },
+  detailBuyText: { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
 
-  // 👉 NEW: QR MODAL STYLES
-  qrCard: { width: '100%', maxWidth: 320, backgroundColor: '#FFFFFF', borderRadius: 32, padding: 32, alignItems: 'center', elevation: 10 },
-  qrHeader: { alignItems: 'center', marginBottom: 24 },
-  qrIconWrap: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#ECFDF5', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-  qrTitle: { fontSize: 22, fontWeight: '800', color: '#1F2937', marginBottom: 4 },
-  qrSub: { fontSize: 14, color: '#6B7280', textAlign: 'center' },
-  qrImageWrap: { width: 200, height: 200, padding: 12, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#F3F4F6', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 12, elevation: 2, marginBottom: 24 },
+  qrCard: { width: '100%', maxWidth: 340, backgroundColor: theme.colors.surface, borderRadius: theme.radius.lg, padding: 32, alignItems: 'center' },
+  qrHeader: { alignItems: 'center', marginBottom: 28 },
+  qrIconWrap: { width: 64, height: 64, borderRadius: 32, backgroundColor: theme.colors.successLight, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  qrTitle: { ...theme.typography.h2, color: theme.colors.textPrimary },
+  qrSub: { ...theme.typography.body, color: theme.colors.textSecondary, marginTop: 4 },
+  qrImageWrap: { width: 220, height: 220, padding: 12, backgroundColor: '#FFFFFF', borderRadius: theme.radius.md, borderWidth: 1, borderColor: theme.colors.border, ...theme.shadow.sm, marginBottom: 28 },
   qrImage: { width: '100%', height: '100%' },
-  qrCodeBox: { backgroundColor: '#F9FAFB', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 16, alignItems: 'center', marginBottom: 24, width: '100%' },
-  qrCodeLabel: { fontSize: 10, fontWeight: '800', color: '#9CA3AF', letterSpacing: 1, marginBottom: 4 },
-  qrCodeValue: { fontSize: 20, fontWeight: '800', color: '#10B981', letterSpacing: 2 },
-  qrCloseBtn: { width: '100%', paddingVertical: 14, borderRadius: 16, backgroundColor: '#F3F4F6', alignItems: 'center' },
-  qrCloseBtnText: { fontSize: 15, fontWeight: '700', color: '#4B5563' }
+  qrCodeBox: { backgroundColor: theme.colors.background, paddingVertical: 16, borderRadius: theme.radius.md, alignItems: 'center', marginBottom: 28, width: '100%' },
+  qrCodeLabel: { ...theme.typography.caption, fontWeight: '900', color: theme.colors.textTertiary, letterSpacing: 2, marginBottom: 6 },
+  qrCodeValue: { fontSize: 22, fontWeight: '900', color: theme.palette.green600, letterSpacing: 3 },
+  qrCloseBtn: { width: '100%', paddingVertical: 16, borderRadius: theme.radius.md, backgroundColor: theme.colors.background, alignItems: 'center' },
+  qrCloseBtnText: { ...theme.typography.label, color: theme.colors.textSecondary }
 });

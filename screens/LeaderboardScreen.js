@@ -1,14 +1,13 @@
-import React, { useState } from 'react';
-import {
-  View, Text, TouchableOpacity,
-  ScrollView, StyleSheet, Switch, Alert, Dimensions
-} from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Switch, Dimensions, Share, Modal, Pressable, Linking, Image, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Defs, RadialGradient, Stop } from 'react-native-svg';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
+import Toast from 'react-native-toast-message';
+import firestore from '@react-native-firebase/firestore'; 
 
-// 1. Using global context for Ghost Mode syncing
 import { useApp } from '../context/AppContext';
 
 const { width } = Dimensions.get('window');
@@ -28,24 +27,104 @@ const FlameIcon = ({ size = 14 }) => (
   </Svg>
 );
 
-const USERS = [
-  { rank: 1, name: 'Shreya Monstera', completedTaskCount: 142, avatar: '👩‍🦱', isMe: false },
-  { rank: 2, name: 'Anjali Kadam', completedTaskCount: 128, avatar: '👩', isMe: false },
-  { rank: 3, name: 'Roy Oberoi', completedTaskCount: 115, avatar: '👨', isMe: false },
-  { rank: 4, name: 'Atul', completedTaskCount: 95, avatar: '🧑', isMe: false },
-  { rank: 5, name: 'Anuj', completedTaskCount: 88, avatar: '👱', isMe: false },
-  { rank: 6, name: 'Priyanka', completedTaskCount: 76, avatar: '👩‍🦰', isMe: false },
-  { rank: 7, name: 'Rutik (You)', completedTaskCount: 64, avatar: '🧑‍💼', isMe: true },
-  { rank: 8, name: 'Aniket', completedTaskCount: 42, avatar: '👨‍💼', isMe: false },
-];
-
 const LeaderboardScreen = () => {
-  // Global sync instead of local state
-  const { ghostMode, setGhostMode } = useApp();
-  const [period, setPeriod] = useState('Week');
+  const { user, userProfile, ghostMode, setGhostMode, playfulMode } = useApp();
+  const isSassyMode = playfulMode;
 
-  const top3 = USERS.slice(0, 3);
-  const rest = USERS.slice(3);
+  const [period, setPeriod] = useState('Week');
+  
+  // NEW: Firebase & Modal State
+  const [leaderboardData, setLeaderboardData] = useState([]);
+  const [isLoadingList, setIsLoadingList] = useState(true);
+  const [isShareModalVisible, setIsShareModalVisible] = useState(false);
+
+  const hasFriends = userProfile?.friends && userProfile.friends.length > 0;
+  const myCode = userProfile?.referralCode || "LOADING...";
+
+  const messageToShare = isSassyMode 
+    ? `I'm dominating my habits. Download the app, use my invite code ${myCode}, and let's see if you can keep up. 🚀`
+    : `Join me on my habit-tracking journey! Use my invite code ${myCode} when you sign up to get 50 bonus coins. 🪙`;
+
+  // ==========================================
+  // FETCH REAL-TIME DATA
+  // ==========================================
+  // ==========================================
+  // FETCH REAL-TIME DATA
+  // ==========================================
+  useEffect(() => {
+    if (!hasFriends || !user) {
+      setIsLoadingList(false);
+      return;
+    }
+
+    const fetchLeaderboard = async () => {
+      try {
+        // Filter out any accidentally null or undefined friend UIDs
+        const uidsToFetch = [user.uid, ...userProfile.friends].filter(Boolean);
+        
+        const userDocs = await Promise.all(
+          uidsToFetch.map(uid => firestore().collection('users').doc(uid).get())
+        );
+
+        const formattedData = userDocs
+          .filter(doc => doc && doc.exists)
+          .map(doc => {
+            // 🔥 THE FIX: Safe data extraction. If data is undefined, fallback to an empty object
+            const data = doc.data() || {};
+
+            return {
+              id: doc.id,
+              name: data.displayName || data.name || "Ghost User", // Also checks 'name' just in case
+              completedTaskCount: data.totalPoints || 0, 
+              avatar: data.avatar || '🧑‍💼', 
+              isMe: doc.id === user.uid
+            };
+          })
+          .sort((a, b) => b.completedTaskCount - a.completedTaskCount)
+          .map((u, i) => ({ ...u, rank: i + 1 }));
+
+        setLeaderboardData(formattedData);
+      } catch (error) {
+        console.error("Error fetching leaderboard:", error);
+      } finally {
+        setIsLoadingList(false);
+      }
+    };
+
+    fetchLeaderboard();
+  }, [hasFriends, userProfile, user]);
+
+  // ==========================================
+  // SHARE HANDLERS
+  // ==========================================
+  const shareToWhatsApp = async () => {
+    try { await Linking.openURL(`whatsapp://send?text=${encodeURIComponent(messageToShare)}`); setIsShareModalVisible(false); } 
+    catch { Toast.show({ type: 'error', text1: 'WhatsApp not installed' }); }
+  };
+
+  const shareToInstagram = async () => {
+    await Clipboard.setStringAsync(messageToShare);
+    Toast.show({ type: 'success', text1: 'Copied!', text2: 'Paste this in your Instagram DM or Story.' });
+    try { await Linking.openURL('instagram://app'); setIsShareModalVisible(false); } 
+    catch { executeNativeShare(); }
+  };
+
+  const copyToClipboard = async () => {
+    await Clipboard.setStringAsync(messageToShare);
+    Toast.show({ type: 'success', text1: 'Copied to clipboard! 📋' });
+    setIsShareModalVisible(false);
+  };
+
+  const executeNativeShare = async () => {
+    try { await Share.share({ message: messageToShare }); setIsShareModalVisible(false); } 
+    catch (error) { console.error("Error:", error.message); }
+  };
+
+  // ==========================================
+  // UI LOGIC
+  // ==========================================
+  const top3 = leaderboardData.slice(0, 3);
+  const rest = leaderboardData.slice(3);
 
   const podiumOrder = [top3[1], top3[0], top3[2]];
   const podiumHeights = [100, 130, 80];
@@ -55,11 +134,9 @@ const LeaderboardScreen = () => {
 
   return (
     <SafeAreaView style={s.safe}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={s.scroll}
-      >
-        {/* Header */}
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}>
+        
+        {/* HEADER */}
         <View style={s.header}>
           <Text style={s.title}>Leaderboard</Text>
           <View style={s.ghostRow}>
@@ -76,114 +153,163 @@ const LeaderboardScreen = () => {
 
         <View style={s.divider} />
 
-        {/* Week / Month Toggle */}
-        <View style={s.periodToggle}>
-          {['Week', 'Month'].map(p => (
-            <TouchableOpacity
-              key={p}
-              style={[s.periodBtn, period === p && s.periodBtnActive]}
-              onPress={() => setPeriod(p)}
-            >
-              <Text style={[s.periodBtnText, period === p && s.periodBtnTextActive]}>
-                {p}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {/* LOADING STATE */}
+        {hasFriends && isLoadingList ? (
+          <View style={{ flex: 1, justifyContent: 'center', marginTop: 100 }}>
+            <ActivityIndicator size="large" color="#10B981" />
+          </View>
+        ) : 
 
-        {/* Podium Top 3 */}
-        <View style={s.podiumWrapper}>
-          {podiumOrder.map((user, i) => {
-            if (!user) return null;
-            
-            // Logic to hide the users
-            const isGhosted = ghostMode && !user.isMe;
-            const rank = podiumRanks[i];
-            const h = podiumHeights[i];
-            const avatarSize = avatarSizes[i];
-            const borderColor = rankBorderColors[i];
+        /* POPULATED LIST (YOUR ORIGINAL UI) */
+        hasFriends && !isLoadingList ? (
+          <>
+            <View style={s.periodToggle}>
+              {['Week', 'Month'].map(p => (
+                <TouchableOpacity key={p} style={[s.periodBtn, period === p && s.periodBtnActive]} onPress={() => setPeriod(p)}>
+                  <Text style={[s.periodBtnText, period === p && s.periodBtnTextActive]}>{p}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
 
-            return (
-              <View key={user.rank} style={s.podiumCol}>
-                <View style={[s.podiumTop, isGhosted && s.userRowBlur]}>
-                  <View style={[
-                    s.podiumAvatar,
-                    { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2, borderColor }
-                  ]}>
-                    <Text style={{ fontSize: avatarSize * 0.5 }}>
-                      {isGhosted ? '👻' : user.avatar}
+            {/* Podium Top 3 */}
+            <View style={s.podiumWrapper}>
+              {podiumOrder.map((userData, i) => {
+                if (!userData) return null;
+                const isGhosted = ghostMode && !userData.isMe;
+                const rank = podiumRanks[i];
+                const h = podiumHeights[i];
+                const avatarSize = avatarSizes[i];
+                const borderColor = rankBorderColors[i];
+
+                return (
+                  <View key={userData.rank} style={s.podiumCol}>
+                    <View style={[s.podiumTop, isGhosted && s.userRowBlur]}>
+                      <View style={[s.podiumAvatar, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2, borderColor }]}>
+                        
+                        {/* Dynamic Avatar Handler */}
+                        {isGhosted ? <Text style={{ fontSize: avatarSize * 0.5 }}>👻</Text> : 
+                          userData.avatar?.startsWith('http') ? 
+                          <Image source={{ uri: userData.avatar }} style={{ width: '100%', height: '100%', borderRadius: 100 }} /> :
+                          <Text style={{ fontSize: avatarSize * 0.5 }}>{userData.avatar}</Text>
+                        }
+
+                        <View style={[s.rankBadge, { borderColor, backgroundColor: '#fff' }]}>
+                          <Text style={[s.rankBadgeText, { color: borderColor }]}>{rank}</Text>
+                        </View>
+                      </View>
+                      <Text style={s.podiumName} numberOfLines={1}>
+                        {isGhosted ? '••••••' : userData.name.split(' ')[0]}
+                      </Text>
+                      <View style={s.podiumScore}>
+                        <Text style={s.podiumScoreText}>🪙 {isGhosted ? '•••' : userData.completedTaskCount}</Text>
+                      </View>
+                    </View>
+
+                    <LinearGradient
+                      colors={rank === 1 ? ['#10B981', '#059669'] : ['#34D399', '#10B981']}
+                      style={[s.podiumBar, { height: h }]}
+                    >
+                      <Text style={s.podiumBarNum}>{rank}</Text>
+                    </LinearGradient>
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* Rest of list rank 4+ */}
+            {rest.map((userData, i) => {
+              const isGhosted = ghostMode && !userData.isMe;
+              return (
+                <View key={userData.rank}>
+                  <View style={[s.userRow, userData.isMe && s.userRowMe, isGhosted && s.userRowBlur]}>
+                    <Text style={s.rank}>{userData.rank}</Text>
+                    
+                    <View style={s.userAvatar}>
+                      {isGhosted ? <Text style={{ fontSize: 24 }}>👻</Text> : 
+                        userData.avatar?.startsWith('http') ? 
+                        <Image source={{ uri: userData.avatar }} style={{ width: '100%', height: '100%', borderRadius: 100 }} /> :
+                        <Text style={{ fontSize: 24 }}>{userData.avatar}</Text>
+                      }
+                    </View>
+
+                    <Text style={[s.userName, { flex: 1 }]} numberOfLines={1}>
+                      {isGhosted ? '••••••' : userData.name}
                     </Text>
-                    <View style={[s.rankBadge, { borderColor, backgroundColor: '#fff' }]}>
-                      <Text style={[s.rankBadgeText, { color: borderColor }]}>{rank}</Text>
+                    <View style={s.scoreRow}>
+                      <Text style={s.scoreText}>{isGhosted ? '•••' : userData.completedTaskCount} Coins 🪙</Text>
                     </View>
                   </View>
-                  <Text style={s.podiumName} numberOfLines={1}>
-                    {isGhosted ? '••••••' : user.name.split(' ')[0]}
-                  </Text>
-                  <View style={s.podiumScore}>
-                    <Feather name="check-circle" size={12} color="#10B981" />
-                    <Text style={s.podiumScoreText}>
-                      {isGhosted ? '•••' : user.completedTaskCount}
-                    </Text>
-                  </View>
+                  {i < rest.length - 1 && <View style={s.separator} />}
                 </View>
+              );
+            })}
 
-                {/* Original Green Gradient */}
-                <LinearGradient
-                  colors={rank === 1 ? ['#10B981', '#059669'] : ['#34D399', '#10B981']}
-                  style={[s.podiumBar, { height: h }]}
-                >
-                  <Text style={s.podiumBarNum}>{rank}</Text>
-                </LinearGradient>
-              </View>
-            );
-          })}
-        </View>
+            <TouchableOpacity onPress={() => setIsShareModalVisible(true)} activeOpacity={0.85}>
+              <LinearGradient colors={['#10B981', '#059669']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.inviteBtn}>
+                <Text style={s.inviteBtnText}>Invite Friend (+100 Coins)</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </>
+        ) : 
 
-        {/* Rest of list rank 4+ */}
-        {rest.map((user, i) => {
-          const isGhosted = ghostMode && !user.isMe;
-          return (
-            <View key={user.rank}>
-              <View style={[
-                s.userRow,
-                user.isMe && s.userRowMe,
-                isGhosted && s.userRowBlur,
-              ]}>
-                <Text style={s.rank}>{user.rank}</Text>
-                <View style={s.userAvatar}>
-                  <Text style={{ fontSize: 24 }}>
-                    {isGhosted ? '👻' : user.avatar}
-                  </Text>
-                </View>
-                <Text style={[s.userName, { flex: 1 }]} numberOfLines={1}>
-                  {isGhosted ? '••••••' : user.name}
-                </Text>
-                <View style={s.scoreRow}>
-                  <Feather name="check-circle" size={14} color="#10B981" />
-                  <Text style={s.scoreText}>
-                    {isGhosted ? '•••' : user.completedTaskCount} Tasks
-                  </Text>
-                </View>
-              </View>
-              {i < rest.length - 1 && <View style={s.separator} />}
+        /* EMPTY STATE CARD (NO FRIENDS YET) */
+        (
+          <View style={s.emptyCard}>
+            <View style={s.iconCircle}>
+              <MaterialCommunityIcons name={isSassyMode ? "account-cancel-outline" : "account-group"} size={60} color="#10B981" />
             </View>
-          );
-        })}
-
-        {/* Invite Button */}
-        <TouchableOpacity onPress={() => Alert.alert('Invite Friends')} activeOpacity={0.85}>
-          <LinearGradient
-            colors={['#10B981', '#059669']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={s.inviteBtn}
-          >
-            <Text style={s.inviteBtnText}>Invite Friends</Text>
-          </LinearGradient>
-        </TouchableOpacity>
+            <Text style={s.emptyTitle}>{isSassyMode ? "It's awfully quiet in here." : "Build your community"}</Text>
+            <Text style={s.emptySubtitle}>
+              {isSassyMode ? "Invite some friends so you actually have someone to crush on the leaderboard." : "Invite friends to track habits together. You get 100 coins, they get 50!"}
+            </Text>
+            <View style={s.codeContainer}>
+              <Text style={s.codeLabel}>YOUR INVITE CODE</Text>
+              <Text style={s.codeText}>{myCode}</Text>
+            </View>
+            <TouchableOpacity onPress={() => setIsShareModalVisible(true)} activeOpacity={0.85} style={{width: '100%'}}>
+              <LinearGradient colors={['#10B981', '#059669']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.inviteBtnEmpty}>
+                <MaterialCommunityIcons name="share-variant" size={20} color="#FFFFFF" />
+                <Text style={s.inviteBtnText}>Invite Friend (+100 Coins)</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        )}
 
       </ScrollView>
+
+      {/* 🚀 CUSTOM SHARE MODAL */}
+      <Modal animationType="slide" transparent={true} visible={isShareModalVisible} onRequestClose={() => setIsShareModalVisible(false)}>
+        <View style={s.modalOverlay}>
+          <Pressable style={s.modalBackground} onPress={() => setIsShareModalVisible(false)} />
+          <View style={s.modalContent}>
+            <View style={s.modalDragHandle} />
+            <Text style={s.modalTitle}>Share Invite Code</Text>
+            <Text style={s.modalSubtitle}>Send this to your friends. You get 100 coins when they join!</Text>
+            <View style={s.modalCodeBox}>
+              <Text style={s.modalCodeText}>{myCode}</Text>
+            </View>
+            <View style={s.socialOptionsContainer}>
+              <TouchableOpacity style={s.socialOption} onPress={shareToWhatsApp}>
+                <View style={[s.socialIconCircle, { backgroundColor: '#E8F5E9' }]}><MaterialCommunityIcons name="whatsapp" size={34} color="#25D366" /></View>
+                <Text style={s.socialOptionText}>WhatsApp</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.socialOption} onPress={shareToInstagram}>
+                <View style={[s.socialIconCircle, { backgroundColor: '#FCE4EC' }]}><MaterialCommunityIcons name="instagram" size={34} color="#E1306C" /></View>
+                <Text style={s.socialOptionText}>Instagram</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.socialOption} onPress={copyToClipboard}>
+                <View style={[s.socialIconCircle, { backgroundColor: '#EFF6FF' }]}><MaterialCommunityIcons name="link-variant" size={30} color="#3B82F6" /></View>
+                <Text style={s.socialOptionText}>Copy Link</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.socialOption} onPress={executeNativeShare}>
+                <View style={[s.socialIconCircle, { backgroundColor: '#F3F4F6' }]}><MaterialCommunityIcons name="dots-horizontal" size={34} color="#6B7280" /></View>
+                <Text style={s.socialOptionText}>More</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 };
@@ -192,22 +318,25 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#fff' },
   scroll: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 120 },
 
+  // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   title: { fontSize: 26, fontWeight: '800', color: '#1C1C1E' },
   ghostRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   ghostLabel: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
   divider: { height: 1, backgroundColor: '#F3F4F6', marginBottom: 20 },
 
+  // Toggle
   periodToggle: { flexDirection: 'row', backgroundColor: '#E8F8F2', borderRadius: 30, padding: 4, marginBottom: 28 },
   periodBtn: { flex: 1, paddingVertical: 10, borderRadius: 26, alignItems: 'center' },
   periodBtnActive: { backgroundColor: '#10B981' },
   periodBtnText: { fontSize: 15, fontWeight: '600', color: '#10B981' },
   periodBtnTextActive: { color: '#fff' },
 
+  // Podium
   podiumWrapper: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'center', gap: 8, marginBottom: 28 },
   podiumCol: { flex: 1, alignItems: 'center' },
   podiumTop: { alignItems: 'center', marginBottom: 8, gap: 4 },
-  podiumAvatar: { backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', borderWidth: 3, position: 'relative', marginBottom: 4 },
+  podiumAvatar: { backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', borderWidth: 3, position: 'relative', marginBottom: 4, overflow: 'visible' },
   rankBadge: { position: 'absolute', bottom: -4, right: -4, width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
   rankBadgeText: { fontSize: 11, fontWeight: '800' },
   podiumName: { fontSize: 12, fontWeight: '700', color: '#1C1C1E', textAlign: 'center' },
@@ -216,18 +345,44 @@ const s = StyleSheet.create({
   podiumBar: { width: '100%', borderTopLeftRadius: 8, borderTopRightRadius: 8, alignItems: 'center', justifyContent: 'center' },
   podiumBarNum: { color: '#fff', fontSize: 28, fontWeight: '900' },
 
+  // List Items
   userRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12 },
   userRowMe: { borderWidth: 1.5, borderColor: '#10B981', borderRadius: 16, paddingHorizontal: 12, backgroundColor: '#F0FDF4' },
-  userRowBlur: { opacity: 0.2 }, // This creates the blur/fade effect
+  userRowBlur: { opacity: 0.2 }, 
   rank: { fontSize: 15, fontWeight: '700', color: '#9CA3AF', width: 20 },
-  userAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' },
+  userAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   userName: { fontSize: 15, fontWeight: '600', color: '#1C1C1E' },
   scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   scoreText: { fontSize: 15, color: '#10B981', fontWeight: '700' },
   separator: { height: 1, backgroundColor: '#F3F4F6', marginLeft: 80 },
 
+  // Buttons
   inviteBtn: { borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginTop: 24 },
+  inviteBtnEmpty: { borderRadius: 16, paddingVertical: 16, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 10, marginTop: 10 },
   inviteBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
+
+  // Empty State Card (Light Mode Theme)
+  emptyCard: { backgroundColor: '#FFFFFF', padding: 30, borderRadius: 24, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 15, elevation: 3, borderWidth: 1, borderColor: '#F3F4F6', marginTop: 20 },
+  iconCircle: { width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(16, 185, 129, 0.1)', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
+  emptyTitle: { fontSize: 22, fontWeight: 'bold', color: '#1F2937', marginBottom: 10, textAlign: 'center' },
+  emptySubtitle: { fontSize: 15, color: '#6B7280', textAlign: 'center', marginBottom: 30, lineHeight: 22 },
+  codeContainer: { backgroundColor: '#F9FAFB', paddingVertical: 14, paddingHorizontal: 30, borderRadius: 16, marginBottom: 24, borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center', width: '100%' },
+  codeLabel: { fontSize: 11, color: '#9CA3AF', fontWeight: 'bold', letterSpacing: 1.2, marginBottom: 6 },
+  codeText: { fontSize: 24, color: '#10B981', fontWeight: '900', letterSpacing: 3 },
+
+  // Modal (Light Mode Theme)
+  modalOverlay: { flex: 1, justifyContent: 'flex-end' },
+  modalBackground: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0, 0, 0, 0.4)' },
+  modalContent: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 24, paddingBottom: 50, alignItems: 'center' },
+  modalDragHandle: { width: 40, height: 5, backgroundColor: '#E5E7EB', borderRadius: 5, marginBottom: 20 },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#111827', marginBottom: 8 },
+  modalSubtitle: { fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 25, paddingHorizontal: 10 },
+  modalCodeBox: { backgroundColor: '#ECFDF5', borderWidth: 2, borderColor: '#10B981', borderRadius: 12, paddingVertical: 15, paddingHorizontal: 40, marginBottom: 30 },
+  modalCodeText: { fontSize: 28, fontWeight: '900', color: '#10B981', letterSpacing: 4 },
+  socialOptionsContainer: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', paddingHorizontal: 10 },
+  socialOption: { alignItems: 'center', flex: 1 },
+  socialIconCircle: { width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
+  socialOptionText: { fontSize: 12, color: '#4B5563', fontWeight: '600' }
 });
 
 export default LeaderboardScreen;

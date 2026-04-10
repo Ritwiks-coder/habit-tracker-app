@@ -13,12 +13,29 @@ import { useApp } from '../context/AppContext';
 import AddTaskModal from '../components/AddTaskModal';
 import { analyzeTask, getTaskEmoji } from '../utils/smartTaskEngine';
 
-const formatTime = (minutes) => {
-  if (!minutes) return '0 min';
-  if (minutes < 60) return `${minutes} min`;
-  const hrs = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`;
+const getSafeDuration = (durationInMinutes) => {
+  // 1. If it's missing, null, or Not a Number, return null so we can fallback to timeCategory
+  if (!durationInMinutes || isNaN(durationInMinutes)) {
+    return null;
+  }
+
+  // 2. If it is a real number, safely calculate the math
+  const hours = Math.floor(durationInMinutes / 60);
+  const minutes = durationInMinutes % 60;
+
+  if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h`;
+  return `${minutes}m`;
+};
+
+const getRemainingLockTime = (lockedUntilDate) => {
+  if (!lockedUntilDate) return null;
+  const total = new Date(lockedUntilDate) - new Date();
+  if (total <= 0) return null; // Lock is over
+  
+  const days = Math.floor(total / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((total / (1000 * 60 * 60)) % 24);
+  return `${days}d ${hours}hr`;
 };
 
 // --- TIME TABS ICONS (Your Original Colors) ---
@@ -33,6 +50,7 @@ const AfternoonIcon = ({ active }) => (
 const EveningIcon = ({ active }) => (
   <Feather name="moon" size={20} color={active ? '#fff' : '#5C6BC0'} />
 );
+
 
 // --- SVG ICONS ---
 const AddIcon = () => (
@@ -89,7 +107,11 @@ const InfoNote = ({ onDismiss }) => (
 
 const TaskListScreen = () => {
   const navigation = useNavigation();
-  const { tasks, draftTasks, setDraftTasks, removeTask, startRoutine, isRoutineLocked, saveBulkTasks } = useApp();
+  const { tasks, draftTasks, setDraftTasks, removeTask, startRoutine, isRoutineLocked, routineLockedUntil, saveBulkTasks, userProfile } = useApp();
+  
+  // ── LOCK LOGIC (Clean Data) ──
+  const lockRemaining = getRemainingLockTime(routineLockedUntil || userProfile?.routineLockedUntil);
+  const isLocked = lockRemaining !== null;
   const [activeTab, setActiveTab] = useState('Morning');
   const [selectedDuration, setSelectedDuration] = useState('7 Days');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -225,11 +247,9 @@ const TaskListScreen = () => {
 
               <View style={{ flex: 1 }}>
                 <Text style={s.taskName}>{task.name}</Text>
-                {task.estimatedTime && (
-                  <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
-                    ⏱️ {formatTime(task.estimatedTime)}
-                  </Text>
-                )}
+                <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
+                  {task.duration || '15 min'}
+                </Text>
               </View>
 
               {!isRoutineLocked && (
@@ -275,18 +295,19 @@ const TaskListScreen = () => {
           {(!isDraftMode || (isDraftMode && draftTasks.length > 0)) && (
             <TouchableOpacity 
               onPress={handleSaveClick} 
-              disabled={isRoutineLocked} 
-              activeOpacity={0.85}
+              disabled={isLocked} 
+              activeOpacity={0.8}
+              style={[s.saveBtnStyle, isLocked && { backgroundColor: '#F3F4F6' }]}
             >
               <LinearGradient
-                colors={isRoutineLocked ? ['#9CA3AF', '#9CA3AF'] : ['#10B981', '#059669']}
+                colors={isLocked ? ['#F3F4F6', '#F3F4F6'] : ['#10B981', '#059669']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={s.saveBtn}
               >
-                {!isRoutineLocked && <StartIcon />}
-                <Text style={s.saveBtnText}>
-                  {isRoutineLocked ? '✅ Routine Active' : 'Save & Start'}
+                {!isLocked && <StartIcon />}
+                <Text style={[s.saveBtnText, isLocked && { color: '#9CA3AF' }]}>
+                  {isLocked ? lockRemaining : "Lock Routine"}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>

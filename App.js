@@ -1,6 +1,5 @@
 import 'react-native-gesture-handler';
-// ✅ 1. Added useState and useEffect here
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -8,11 +7,10 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, TouchableOpacity, StyleSheet, Animated, ActivityIndicator } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { Feather } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import * as Linking from 'expo-linking';
 
-// ✅ 3. Added Firebase Auth here
-import auth from '@react-native-firebase/auth';
 
 import { AppProvider, useApp } from './context/AppContext';
 import { ToastProvider } from './context/ToastContext';
@@ -20,9 +18,11 @@ import Toast from 'react-native-toast-message';
 import { toastConfig } from './components/ToastConfig';
 import Sidebar from './components/Sidebar';
 import { navigationRef } from './services/NavigationService';
+import { requestNotificationPermissions } from './utils/NotificationManager';
 
 // -- Personal App screens --
-import OnboardingScreen from './screens/OnboardingScreen';
+import IntroScreen from './screens/IntroScreen';
+import ProfileSetupScreen from './screens/ProfileSetupScreen';
 import LoginScreen from './screens/LoginScreen';
 import SignUpScreen from './screens/SignUpScreen';
 import AuthForgotPasswordScreen from './screens/AuthForgotPasswordScreen';
@@ -45,8 +45,8 @@ import BusinessSelectAccountScreen from './screens/BusinessSelectAccountScreen';
 import BusinessForgotPasswordScreen from './screens/BusinessForgotPasswordScreen';
 import BusinessResetPasswordScreen from './screens/BusinessResetPasswordScreen';
 import BusinessDashboardScreen from './screens/BusinessDashboardScreen';
-import BusinessCouponsScreen from './screens/BusinessCouponsScreen'; 
-import BusinessVerifyScreen from './screens/BusinessVerifyScreen';   
+import BusinessCouponsScreen from './screens/BusinessCouponsScreen';
+import BusinessVerifyScreen from './screens/BusinessVerifyScreen';
 import BusinessSidebar from './components/BusinessSidebar';
 import BusinessNotificationsScreen from './screens/BusinessNotificationsScreen';
 import BusinessStoreScreen from './screens/BusinessStoreScreen';
@@ -78,9 +78,10 @@ const TabIcon = ({ IconComponent, isFocused, onPress }) => {
 };
 
 const CustomTabBar = ({ state, navigation }) => {
+  const insets = useSafeAreaInsets();
   const tabs = [{ name: 'Home' }, { name: 'TaskList' }, { name: 'Leaderboard' }];
   return (
-    <View style={tb.wrapper}>
+    <View style={[tb.wrapper, { paddingBottom: insets.bottom }]}>
       <View style={tb.bar}>
         {tabs.map((tab, i) => <TabIcon key={tab.name} IconComponent={ICONS[i]} isFocused={state.index === i} onPress={() => navigation.navigate(tab.name)} />)}
       </View>
@@ -106,10 +107,10 @@ const BUS_ICONS = [BusHomeIcon, BusCouponIcon, BusVerifyIcon];
 
 const BusTabIcon = ({ IconComponent, isFocused, onPress }) => {
   const scale = useRef(new Animated.Value(1)).current;
-  
+
   const handlePressIn = () => Animated.spring(scale, { toValue: 1.2, useNativeDriver: true, speed: 50 }).start();
   const handlePressOut = () => { Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 30 }).start(); onPress(); };
-  
+
   return (
     <TouchableOpacity onPressIn={handlePressIn} onPressOut={handlePressOut} activeOpacity={1} style={tb.busTabItem}>
       <Animated.View style={[tb.busIconWrap, isFocused && tb.busIconWrapActive, { transform: [{ scale }] }]}>
@@ -120,9 +121,10 @@ const BusTabIcon = ({ IconComponent, isFocused, onPress }) => {
 };
 
 const BusinessTabBar = ({ state, navigation }) => {
+  const insets = useSafeAreaInsets();
   const tabs = [{ name: 'BusHome' }, { name: 'BusCoupons' }, { name: 'BusVerify' }];
   return (
-    <View style={tb.wrapper}>
+    <View style={[tb.wrapper, { paddingBottom: insets.bottom }]}>
       <View style={tb.busBar}>
         {tabs.map((tab, i) => <BusTabIcon key={tab.name} IconComponent={BUS_ICONS[i]} isFocused={state.index === i} onPress={() => navigation.navigate(tab.name)} />)}
       </View>
@@ -139,37 +141,81 @@ const BusinessTabNavigator = () => (
 );
 
 // ==========================================
-// 3. MAIN APP STACK (Roots)
+// 3. AUTH STACK
+// ==========================================
+const AuthStack = () => (
+  <>
+    <Stack.Screen name="Login" component={LoginScreen} />
+    <Stack.Screen name="SignUp" component={SignUpScreen} />
+    <Stack.Screen name="AuthForgotPassword" component={AuthForgotPasswordScreen} />
+    <Stack.Screen name="AuthResetPassword" component={AuthResetPasswordScreen} />
+    <Stack.Screen name="BusinessLogin" component={BusinessLoginScreen} />
+    <Stack.Screen name="BusinessForgotPassword" component={BusinessForgotPasswordScreen} />
+    <Stack.Screen name="BusinessResetPassword" component={BusinessResetPasswordScreen} />
+  </>
+);
+
+// ==========================================
+// 4. MAIN APP STACK
+// ==========================================
+const MainAppStack = () => (
+  <>
+    <Stack.Screen name="Main" component={TabNavigator} />
+    <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
+    <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
+    <Stack.Screen name="ProfileForgotPassword" component={ProfileForgotPasswordScreen} />
+    <Stack.Screen name="NewPassword" component={NewPasswordScreen} />
+    <Stack.Screen name="DiscountCenter" component={DiscountCenterScreen} />
+    <Stack.Screen name="Notifications" component={NotificationsScreen} />
+    <Stack.Screen name="BusinessRegister" component={BusinessRegisterScreen} />
+    <Stack.Screen name="BusinessSelectAccount" component={BusinessSelectAccountScreen} />
+    <Stack.Screen name="AddNewBusiness" component={AddNewBusinessScreen} />
+    <Stack.Screen name="BusinessNotifications" component={BusinessNotificationsScreen} />
+    <Stack.Screen name="BusinessStore" component={BusinessStoreScreen} />
+    <Stack.Screen name="BusinessTransaction" component={BusinessTransactionScreen} />
+    <Stack.Screen name="BusinessTabs" component={BusinessTabNavigator} />
+    <Stack.Screen name="BusinessSupport" component={BusinessSupportScreen} />
+  </>
+);
+
+// ==========================================
+// 5. MAIN NAVIGATION ENGINE
 // ==========================================
 const MainApp = () => {
-  const { sidebarOpen, setSidebarOpen, businessSidebarOpen, setBusinessSidebarOpen } = useApp();
-  
-  // ✅ 4. Initialize Auth States
-  const [initializing, setInitializing] = useState(true);
-  const [user, setUser] = useState(null);
-
-  // ✅ 5. The Firebase Session Listener
-  useEffect(() => {
-    const subscriber = auth().onAuthStateChanged((userState) => {
-      setUser(userState);
-      if (initializing) setInitializing(false);
-    });
-    return subscriber; // unsubscribe on unmount
-  }, [initializing]);
+  const {
+    user,
+    userProfile,
+    authLoading,
+    hasSeenOnboarding,
+    sidebarOpen,
+    setSidebarOpen,
+    businessSidebarOpen,
+    setBusinessSidebarOpen
+  } = useApp();
 
   const prefix = Linking.createURL('/');
-  
+
   const linking = {
     prefixes: [prefix, 'habittracker://', 'exp+habittracker://'],
     config: {
       screens: {
-        NewPassword: 'reset', 
+        NewPassword: 'reset',
       },
     },
   };
 
-  // ✅ 6. Show loading screen while Firebase checks session
-  if (initializing) {
+  // ✅ 1. Request Notification Permissions on App Load
+  React.useEffect(() => {
+    if (user) {
+      const setupNotifications = async () => {
+        await requestNotificationPermissions();
+      };
+      setupNotifications();
+    }
+  }, [user]);
+
+  // Show loading screen while Firebase checks session
+  if (authLoading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8F9FA' }}>
         <ActivityIndicator size="large" color="#10B981" />
@@ -181,44 +227,24 @@ const MainApp = () => {
     <View style={{ flex: 1 }}>
       <NavigationContainer ref={navigationRef} linking={linking}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
-          
-          {/* ✅ 7. Conditional Rendering based on Auth State */}
-          {user ? (
-            // IF LOGGED IN: Show Main App
-            <>
-              <Stack.Screen name="Main" component={TabNavigator} />
-              <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
-              <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
-              <Stack.Screen name="ProfileForgotPassword" component={ProfileForgotPasswordScreen} />
-              <Stack.Screen name="NewPassword" component={NewPasswordScreen} />
-              <Stack.Screen name="DiscountCenter" component={DiscountCenterScreen} />
-              <Stack.Screen name="Notifications" component={NotificationsScreen} />
-              <Stack.Screen name="BusinessRegister" component={BusinessRegisterScreen} />
-              <Stack.Screen name="BusinessSelectAccount" component={BusinessSelectAccountScreen} />
-              <Stack.Screen name="AddNewBusiness" component={AddNewBusinessScreen} />
-              <Stack.Screen name="BusinessNotifications" component={BusinessNotificationsScreen} />
-              <Stack.Screen name="BusinessStore" component={BusinessStoreScreen} />
-              <Stack.Screen name="BusinessTransaction" component={BusinessTransactionScreen} />
-              <Stack.Screen name="BusinessTabs" component={BusinessTabNavigator} />
-              <Stack.Screen name="BusinessSupport" component={BusinessSupportScreen} />
-            </>
+ 
+          {!hasSeenOnboarding ? (
+            // 1. INTRO GATE (Local Storage)
+            <Stack.Screen name="Intro" component={IntroScreen} />
+          ) : !user ? (
+            // 2. AUTH GATE (Firebase Auth)
+            AuthStack()
+          ) : (!userProfile?.gender || !userProfile?.ageBracket) ? (
+            // 3. PROFILE SETUP GATE (Firestore Data)
+            <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
           ) : (
-            // IF NOT LOGGED IN: Show Auth Flow
-            <>
-              <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-              <Stack.Screen name="Login" component={LoginScreen} />
-              <Stack.Screen name="SignUp" component={SignUpScreen} />
-              <Stack.Screen name="AuthForgotPassword" component={AuthForgotPasswordScreen} />
-              <Stack.Screen name="AuthResetPassword" component={AuthResetPasswordScreen} />
-              <Stack.Screen name="BusinessLogin" component={BusinessLoginScreen} />
-              <Stack.Screen name="BusinessForgotPassword" component={BusinessForgotPasswordScreen} />
-              <Stack.Screen name="BusinessResetPassword" component={BusinessResetPasswordScreen} />
-            </>
+            // 4. MAIN APP GATE
+            MainAppStack()
           )}
 
         </Stack.Navigator>
       </NavigationContainer>
-      
+
       {/* Sidebar only renders if logged in */}
       {user && (
         <>
@@ -248,13 +274,13 @@ export default function App() {
 // ==========================================
 const tb = StyleSheet.create({
   wrapper: { position: 'absolute', bottom: 24, left: 0, right: 0, alignItems: 'center', zIndex: 10, elevation: 10 },
-  
+
   // Personal Tab Styles (Green)
   bar: { flexDirection: 'row', backgroundColor: '#EFFFFA', borderRadius: 40, paddingVertical: 10, paddingHorizontal: 16, gap: 8, shadowColor: '#10B981', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 12, alignItems: 'center' },
   tabItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   iconWrap: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
   iconWrapActive: { backgroundColor: '#10B981', shadowColor: '#10B981', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6 },
-  
+
   // Business Tab Styles (Indigo)
   busBar: { flexDirection: 'row', backgroundColor: '#EEF2FF', borderRadius: 40, paddingVertical: 8, paddingHorizontal: 16, gap: 16, alignItems: 'center', shadowColor: '#4338CA', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 12 },
   busTabItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },

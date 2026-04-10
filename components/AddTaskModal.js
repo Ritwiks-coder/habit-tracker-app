@@ -4,6 +4,46 @@ import {
   TextInput, ScrollView, Alert, KeyboardAvoidingView, Platform
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import theme from '../src/theme/theme';
+
+const DURATION_PREDICTIONS = {
+  gym: '1 hr',
+  workout: '1 hr',
+  exercise: '45 min',
+  breakfast: '20 min',
+  lunch: '30 min',
+  dinner: '45 min',
+  meal: '30 min',
+  read: '20 min',
+  study: '1 hr',
+  office: '8 hr',
+  work: '8 hr',
+  notes: '30 min',
+  meditate: '10 min',
+  meditation: '10 min',
+  walk: '20 min',
+  shower: '15 min',
+  water: '1 min',
+  bed: '2 min',
+  vitamin: '1 min',
+  pill: '1 min',
+  stretch: '10 min',
+  journal: '10 min',
+  skincare: '5 min',
+  teeth: '2 min',
+  clean: '15 min',
+  plan: '10 min',
+  gratitude: '5 min',
+  hobby: '30 min'
+};
+
+const predictDuration = (text) => {
+  const lowerText = text.toLowerCase();
+  for (const [keyword, defaultTime] of Object.entries(DURATION_PREDICTIONS)) {
+    if (lowerText.includes(keyword)) return defaultTime;
+  }
+  return null;
+};
 import Svg, { Path } from 'react-native-svg';
 import { Feather } from '@expo/vector-icons';
 import { useApp } from '../context/AppContext';
@@ -13,15 +53,15 @@ import { suggestedTasksByCategory } from '../utils/smartTaskEngine';
 const MAX_TASKS = 6;
 
 const MorningIcon = ({ active }) => (
-  <Feather name="sunrise" size={20} color={active ? '#fff' : '#F3CD50'} />
+  <Feather name="sunrise" size={20} color={active ? theme.colors.textInverse : '#F3CD50'} />
 );
 
 const EveningIcon = ({ active }) => (
-  <Feather name="moon" size={20} color={active ? '#fff' : '#5C6BC0'} />
+  <Feather name="moon" size={20} color={active ? theme.colors.textInverse : '#5C6BC0'} />
 );
 
 const AfternoonIcon = ({ active }) => (
-  <Feather name="sun" size={20} color={active ? '#fff' : '#F57C00'} />
+  <Feather name="sun" size={20} color={active ? theme.colors.textInverse : '#F57C00'} />
 );
 
 const TIME_TABS = [
@@ -47,12 +87,16 @@ const AddTaskModal = ({ visible, onClose }) => {
   const [taskInput, setTaskInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [activeSection, setActiveSection] = useState('suggestions'); 
+  const [duration, setDuration] = useState('');
+  const [isAutoGuessed, setIsAutoGuessed] = useState(false);
 
   useEffect(() => {
     if (!visible) {
       setTaskInput(''); 
       setActiveTab('Morning'); 
       setActiveSection('suggestions'); 
+      setDuration('');
+      setIsAutoGuessed(false);
     }
   }, [visible]);
 
@@ -93,8 +137,10 @@ const AddTaskModal = ({ visible, onClose }) => {
       const taskObj = {
         name: task.name,
         icon: task.icon,
-        time: activeTab,
+        time: task.time || '', // 🚨 Changed: Don't force activeTab here!
+        timeBlock: activeTab, 
         timeCategory: activeTab,
+        duration: task.duration || predictDuration(task.name) || '15 min',
         descPlayful: task.descPlayful,
         descProfessional: task.descProfessional,
         order: task.order || 50
@@ -111,7 +157,7 @@ const AddTaskModal = ({ visible, onClose }) => {
   const handleAddManual = async () => {
     const trimmed = taskInput.trim();
     if (!trimmed) return;
-    
+    setLoading(true);
     if (isMaxReached) {
       Alert.alert('Limit Reached', `Max ${MAX_TASKS} tasks per ${activeTab}!`);
       return;
@@ -133,11 +179,13 @@ const AddTaskModal = ({ visible, onClose }) => {
       const taskObj = { 
         name: match.name, 
         icon: match.icon, 
-        time: activeTab, 
+        time: '', 
+        timeBlock: activeTab,
         timeCategory: activeTab,
+        duration: duration || predictDuration(match.name) || '15 min', 
         descPlayful: match.descPlayful, 
         descProfessional: match.descProfessional,
-        order: match.order || 50 // ADDED: Pulls order from match
+        order: match.order || 50 
       };
 
       if (isDraftMode) {
@@ -156,7 +204,6 @@ const AddTaskModal = ({ visible, onClose }) => {
           body: JSON.stringify({
             model: 'claude-3-haiku-20240307', 
             max_tokens: 100,
-            // ADDED: Prompt now strictly demands an "order" number
             messages: [{ 
               role: 'user', 
               content: `You are an app assistant. The user added a habit called "${trimmed}". Write two 1-sentence reminders (max 8 words each). 1: "sassy" (Funny, sarcastic). 2: "pro" (Professional, polite). 3: "order" (A number 1-100 indicating when this is typically done in a time block. 1 is first, 100 is absolute last, e.g., sleeping is 100). Return ONLY a valid JSON object in this exact format, nothing else: {"sassy": "...", "pro": "...", "order": 50}` 
@@ -178,8 +225,10 @@ const AddTaskModal = ({ visible, onClose }) => {
         const taskObj = { 
           name: trimmed, 
           icon: '⚡', 
-          time: activeTab, 
+          time: '', 
+          timeBlock: activeTab,
           timeCategory: activeTab,
+          duration: duration || predictDuration(trimmed) || '15 min',
           descPlayful: aiResponse.sassy || "You know what to do 😏", 
           descProfessional: aiResponse.pro || `Time to complete your ${trimmed} habit.`,
           order: aiResponse.order || 50
@@ -196,8 +245,10 @@ const AddTaskModal = ({ visible, onClose }) => {
         const taskObj = { 
           name: trimmed, 
           icon: '⚡', 
-          time: activeTab,
+          time: '',
+          timeBlock: activeTab,
           timeCategory: activeTab, 
+          duration: duration || predictDuration(trimmed) || '15 min',
           descPlayful: "You know what to do 😏", 
           descProfessional: `Time to complete your ${trimmed} habit.`,
           order: 50 
@@ -226,6 +277,8 @@ const AddTaskModal = ({ visible, onClose }) => {
     
     // 2. Clear all inputs
     setTaskInput('');
+    setDuration('');
+    setIsAutoGuessed(false);
     setActiveTab('Morning');
     setActiveSection('suggestions');
     
@@ -275,7 +328,7 @@ const AddTaskModal = ({ visible, onClose }) => {
               );
             })}
             <View style={s.countBadge}>
-              <Text style={[s.countText, isMaxReached && { color: '#EF4444' }]}>
+              <Text style={[s.countText, isMaxReached && { color: theme.colors.error }]}>
                 {currentTabTasks.length}/{MAX_TASKS}
               </Text>
             </View>
@@ -305,11 +358,20 @@ const AddTaskModal = ({ visible, onClose }) => {
             <TextInput
               style={s.input}
               placeholder="Search or type custom task..."
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={theme.colors.textTertiary}
               value={taskInput}
               onChangeText={(t) => {
                 setTaskInput(t);
                 if (activeSection !== 'suggestions') setActiveSection('suggestions');
+                
+                const predicted = predictDuration(t);
+                if (predicted && (!duration || isAutoGuessed)) {
+                  setDuration(predicted);
+                  setIsAutoGuessed(true);
+                } else if (!predicted && isAutoGuessed) {
+                  setDuration('');
+                  setIsAutoGuessed(false);
+                }
               }}
               autoCapitalize="words"
               returnKeyType="done"
@@ -317,9 +379,23 @@ const AddTaskModal = ({ visible, onClose }) => {
             />
             {taskInput.length > 0 ? (
               <TouchableOpacity onPress={() => setTaskInput('')}>
-                <Text style={{ color: '#9CA3AF', fontSize: 16, paddingLeft: 8 }}>✕</Text>
+                <Text style={{ color: theme.colors.textTertiary, fontSize: 16, paddingLeft: 8 }}>✕</Text>
               </TouchableOpacity>
             ) : null}
+          </View>
+
+          <View style={s.inputRow}>
+            <Text style={s.searchIcon}>⏱️</Text>
+            <TextInput
+              style={s.input}
+              placeholder="e.g., 15 min or 1 hr"
+              placeholderTextColor={theme.colors.textTertiary}
+              value={duration}
+              onChangeText={(t) => {
+                setDuration(t);
+                setIsAutoGuessed(false); // User took manual control
+              }}
+            />
           </View>
 
           {taskInput.trim().length > 0 && (
@@ -330,7 +406,7 @@ const AddTaskModal = ({ visible, onClose }) => {
               style={{ marginBottom: 10 }}
             >
               <LinearGradient
-                colors={loading || isMaxReached ? ['#9CA3AF', '#9CA3AF'] : ['#10B981', '#34D399']}
+                colors={loading || isMaxReached ? [theme.colors.disabled, theme.colors.disabled] : [theme.colors.success, theme.palette.green400]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={s.addManualBtn}
@@ -386,8 +462,10 @@ const AddTaskModal = ({ visible, onClose }) => {
                           const newTaskObj = {
                             name: suggestedTask,
                             icon: '⭐',
-                            time: activeTab,
+                            time: '', // 🚨 Leave blank so duration takes priority
+                            timeBlock: activeTab, 
                             timeCategory: activeTab,
+                            duration: predictDuration(suggestedTask) || '15 min',
                             descPlayful: `Time for ${suggestedTask} 🎯`,
                             descProfessional: `Complete ${suggestedTask} as part of your ${activeTab} routine.`,
                             order: 50
@@ -492,9 +570,9 @@ const AddTaskModal = ({ visible, onClose }) => {
             </>
           )}
 
-          <TouchableOpacity onPress={handleSaveAndClose} activeOpacity={0.85} style={{ marginTop: 12 }}>
+          <TouchableOpacity onPress={handleSaveAndClose} activeOpacity={0.85} style={{ marginTop: theme.spacing.md }}>
             <LinearGradient
-              colors={['#10B981', '#059669']}
+              colors={[theme.colors.success, theme.palette.green600]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={s.saveBtn}
@@ -514,48 +592,56 @@ const AddTaskModal = ({ visible, onClose }) => {
 const s = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)' },
-  card: { backgroundColor: '#fff', borderRadius: 24, padding: 20, width: '92%', maxWidth: 400, maxHeight: '88%', shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 20, elevation: 10 },
+  card: { 
+    backgroundColor: theme.colors.surface, 
+    borderRadius: theme.radius.xl, 
+    padding: theme.spacing.lg, 
+    width: theme.components.modal.widthPercent, 
+    maxWidth: theme.components.modal.maxWidth, 
+    maxHeight: '88%', 
+    ...theme.shadow.md 
+  },
 
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
-  title: { fontSize: 18, fontWeight: '800', color: '#1C1C1E', marginBottom: 2 },
-  subtitle: { fontSize: 12, color: '#9CA3AF' },
-  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
-  closeBtnText: { fontSize: 13, color: '#6B7280', fontWeight: '700' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: theme.spacing.md },
+  title: { ...theme.typography.h3, color: theme.colors.textPrimary, marginBottom: 2 },
+  subtitle: { ...theme.typography.bodySm, color: theme.colors.textTertiary },
+  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: theme.colors.divider, alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
+  closeBtnText: { ...theme.typography.labelSm, color: theme.colors.textSecondary },
 
-  tabs: { flexDirection: 'row', gap: 10, marginBottom: 14, alignItems: 'center' },
-  tab: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  tabActive: { backgroundColor: '#10B981' },
-  tabBadge: { position: 'absolute', top: -2, right: -2, width: 18, height: 18, borderRadius: 9, backgroundColor: '#10B981', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' },
-  tabBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
-  countBadge: { marginLeft: 'auto', backgroundColor: '#F3F4F6', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
-  countText: { fontSize: 13, fontWeight: '700', color: '#6B7280' },
+  tabs: { flexDirection: 'row', gap: 10, marginBottom: theme.spacing.md, alignItems: 'center' },
+  tab: { width: 48, height: 48, borderRadius: 24, backgroundColor: theme.colors.divider, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  tabActive: { backgroundColor: theme.colors.success },
+  tabBadge: { position: 'absolute', top: -2, right: -2, width: 18, height: 18, borderRadius: 9, backgroundColor: theme.colors.success, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: theme.colors.surface },
+  tabBadgeText: { color: theme.colors.textInverse, fontSize: 10, fontWeight: '800' },
+  countBadge: { marginLeft: 'auto', backgroundColor: theme.colors.divider, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
+  countText: { ...theme.typography.labelSm, color: theme.colors.textSecondary },
 
-  sectionToggle: { flexDirection: 'row', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 3, marginBottom: 12, gap: 3 },
+  sectionToggle: { flexDirection: 'row', backgroundColor: theme.colors.divider, borderRadius: 12, padding: 3, marginBottom: theme.spacing.md, gap: 3 },
   sectionBtn: { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
-  sectionBtnActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, elevation: 2 },
-  sectionBtnText: { fontSize: 13, fontWeight: '600', color: '#9CA3AF' },
-  sectionBtnTextActive: { color: '#1C1C1E' },
+  sectionBtnActive: { backgroundColor: theme.colors.surface, ...theme.shadow.sm },
+  sectionBtnText: { ...theme.typography.labelSm, color: theme.colors.textTertiary },
+  sectionBtnTextActive: { color: theme.colors.textPrimary },
 
-  inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 14, paddingHorizontal: 14, marginBottom: 10 },
+  inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: theme.colors.divider, borderRadius: theme.radius.md, paddingHorizontal: 14, marginBottom: 10 },
   searchIcon: { fontSize: 15, marginRight: 8 },
-  input: { flex: 1, paddingVertical: 12, fontSize: 14, color: '#1C1C1E' },
+  input: { flex: 1, paddingVertical: 12, ...theme.typography.body, color: theme.colors.textPrimary },
 
-  addManualBtn: { borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  addManualText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  addManualBtn: { borderRadius: theme.radius.md, paddingVertical: 12, alignItems: 'center' },
+  addManualText: { color: theme.colors.textInverse, fontWeight: '700', fontSize: 14 },
 
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  sectionLabel: { fontSize: 12, fontWeight: '700', color: '#9CA3AF', letterSpacing: 0.5 },
-  maxText: { fontSize: 12, color: '#EF4444', fontWeight: '600' },
-  emptyHint: { fontSize: 12, color: '#9CA3AF' },
+  sectionLabel: { ...theme.typography.caption, color: theme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5 },
+  maxText: { ...theme.typography.labelSm, color: theme.colors.error },
+  emptyHint: { ...theme.typography.bodySm, color: theme.colors.textTertiary },
 
   list: { maxHeight: 180 },
 
   // ✨ Quick Suggestions Horizontal ScrollView Styles
-  quickSuggestionsScroll: { marginBottom: 12, maxHeight: 110 },
+  quickSuggestionsScroll: { marginBottom: theme.spacing.md, maxHeight: 110 },
   quickSuggestionsContainer: { paddingHorizontal: 0, paddingRight: 12, gap: 8 },
   quickSuggestionBtn: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
+    backgroundColor: theme.colors.divider,
+    borderRadius: theme.radius.md,
     paddingVertical: 10,
     paddingHorizontal: 14,
     flexDirection: 'row',
@@ -563,26 +649,24 @@ const s = StyleSheet.create({
     gap: 6,
     marginRight: 4,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: theme.colors.border,
     minWidth: 140,
   },
   quickSuggestionBtnAdded: {
-    backgroundColor: '#D1FAE5',
-    borderColor: '#10B981',
+    backgroundColor: theme.colors.successLight,
+    borderColor: theme.colors.success,
   },
   quickSuggestionText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#374151',
+    ...theme.typography.label,
+    color: theme.palette.gray700,
     flex: 1,
   },
   quickSuggestionTextAdded: {
-    color: '#10B981',
+    color: theme.colors.success,
   },
   quickSuggestionBadge: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#9CA3AF',
+    ...theme.typography.badge,
+    color: theme.colors.textTertiary,
     borderRadius: 10,
     width: 20,
     height: 20,
@@ -590,52 +674,51 @@ const s = StyleSheet.create({
     textAlignVertical: 'center',
   },
   quickSuggestionBadgeAdded: {
-    color: '#fff',
-    backgroundColor: '#10B981',
+    color: theme.colors.textInverse,
+    backgroundColor: theme.colors.success,
   },
 
   divider: {
     height: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: theme.colors.border,
     marginVertical: 8,
   },
 
-  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, marginBottom: 4, backgroundColor: '#F9FAFB' },
-  rowAdded: { backgroundColor: '#F0FDF4' },
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderRadius: theme.radius.md, marginBottom: 4, backgroundColor: theme.colors.background },
+  rowAdded: { backgroundColor: theme.colors.successLight },
   rowIcon: { fontSize: 20, marginRight: 10 },
-  rowText: { flex: 1, fontSize: 14, fontWeight: '600', color: '#1C1C1E' },
-  rowTextAdded: { color: '#10B981' },
-  badge: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#E8F8F2', alignItems: 'center', justifyContent: 'center' },
-  badgeAdded: { backgroundColor: '#10B981' },
-  badgeText: { color: '#10B981', fontWeight: '800', fontSize: 16 },
-  badgeTextAdded: { color: '#fff', fontSize: 13 },
+  rowText: { flex: 1, ...theme.typography.label, color: theme.colors.textPrimary },
+  rowTextAdded: { color: theme.colors.success },
+  badge: { width: 28, height: 28, borderRadius: 14, backgroundColor: theme.colors.successLight, alignItems: 'center', justifyContent: 'center' },
+  badgeAdded: { backgroundColor: theme.colors.success },
+  badgeText: { color: theme.colors.success, fontWeight: '800', fontSize: 16 },
+  badgeTextAdded: { color: theme.colors.textInverse, fontSize: 13 },
 
-  addedRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, marginBottom: 4, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#D1FAE5' },
-  addedRowText: { flex: 1, fontSize: 14, fontWeight: '600', color: '#10B981' },
+  addedRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderRadius: theme.radius.md, marginBottom: 4, backgroundColor: theme.colors.successLight, borderWidth: 1, borderColor: theme.colors.successBorder },
+  addedRowText: { flex: 1, ...theme.typography.label, color: theme.colors.success },
   removeBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  removeBtnText: { fontSize: 22, color: '#EF4444' },
+  removeBtnText: { fontSize: 22, color: theme.colors.error },
 
   emptyState: { paddingVertical: 20, alignItems: 'center' },
-  emptyText: { color: '#9CA3AF', fontSize: 13, textAlign: 'center', marginBottom: 8 },
-  emptyLink: { color: '#10B981', fontSize: 13, fontWeight: '600' },
+  emptyText: { ...theme.typography.bodySm, color: theme.colors.textTertiary, textAlign: 'center', marginBottom: 8 },
+  emptyLink: { color: theme.colors.success, ...theme.typography.labelSm },
 
-  saveBtn: { borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
-  saveBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  saveBtn: { borderRadius: theme.radius.md, paddingVertical: 14, alignItems: 'center' },
+  saveBtnText: { color: theme.colors.textInverse, fontWeight: '700', fontSize: 15 },
 
   sectionTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#64748B',
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
   suggestionChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F8FAFC',
+    backgroundColor: theme.colors.background,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 100,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.pill,
     paddingVertical: 10,
     paddingLeft: 12,
     paddingRight: 16,
@@ -645,13 +728,12 @@ const s = StyleSheet.create({
     marginRight: 7,
   },
   chipText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#334155',
+    ...theme.typography.label,
+    color: theme.palette.gray700,
     marginRight: 10,
   },
   chipPlus: {
-    backgroundColor: '#E2E8F0',
+    backgroundColor: theme.colors.border,
     width: 20,
     height: 20,
     borderRadius: 10,
@@ -659,9 +741,8 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   chipPlusText: {
-    fontSize: 13,
-    color: '#64748B',
-    fontWeight: '700',
+    ...theme.typography.labelSm,
+    color: theme.colors.textSecondary,
     lineHeight: 18,
   },
 });

@@ -4,11 +4,20 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ✅ 2. Smart Task Engine
 import { analyzeTask, smartSortTasks } from '../utils/smartTaskEngine';
 
 const AppContext = createContext();
+
+// ✅ 3. THE VANISH ENGINE: Determine current time block
+export const getCurrentTimeBlock = () => {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) return 'Morning';
+  if (hour >= 12 && hour < 17) return 'Afternoon';
+  return 'Evening';
+};
 
 // ✅ Clean, universal suggestions for the Add Task screen
 export const SUGGESTED_HABITS = [
@@ -17,7 +26,7 @@ export const SUGGESTED_HABITS = [
   { name: 'Stretch / Yoga', icon: '🧘', timeCategory: 'Morning', estimatedTime: 15 },
   { name: 'Read a Book', icon: '📚', timeCategory: 'Evening', estimatedTime: 30 },
   { name: 'Quick Workout', icon: '💪', timeCategory: 'Evening', estimatedTime: 20 },
-  { name: 'Journaling', icon: '📓', timeCategory: 'Night', estimatedTime: 10 },
+  { name: 'Journaling', icon: '📓', timeCategory: 'Evening', estimatedTime: 10 },
 ];
 
 
@@ -27,74 +36,63 @@ export const AppProvider = ({ children }) => {
   // ==========================================
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [tasks, setTasks] = useState([]);
   const [draftTasks, setDraftTasks] = useState(SUGGESTED_HABITS);
 
   useEffect(() => {
     const unsubscribeAuth = auth().onAuthStateChanged(async (authUser) => {
-      
-      // 🔥 THE FIX: SILENT AUTO-LOGIN ENGINE 🔥
+
+      // ✅ THE FIX: Stop auto-logging in! Just clear the data and show Auth screens.
       if (!authUser) {
-        console.log("👻 No user found. Triggering silent anonymous login...");
-        try {
-          await auth().signInAnonymously();
-          // We return here because the sign-in will re-trigger onAuthStateChanged with the new user!
-        } catch (error) {
-          console.error("❌ Auto-login failed:", error);
-        }
-        return; 
+        console.log("👋 User logged out. Showing Auth screens.");
+        setUser(null);
+        setUserProfile(null);
+        setTasks([]);
+        setAuthLoading(false);
+        return;
       }
 
       console.log("👤 User authenticated:", authUser.uid);
       setUser(authUser);
-      
-      // 1. Listen to User Profile (Points, Ghost Mode, Routine Lock)
+
+      // 1. Listen to User Profile
       const unsubscribeProfile = firestore()
         .collection('users')
         .doc(authUser.uid)
         .onSnapshot(doc => {
-          if (doc.exists) setUserProfile(doc.data());
+          if (doc.exists) {
+            setUserProfile(doc.data());
+          } else {
+            setUserProfile(null);
+          }
+          setAuthLoading(false);
+        }, (error) => {
+          console.error("Profile snapshot error:", error);
+          setAuthLoading(false);
         });
 
-      // 2. Listen to Habits Subcollection (REAL-TIME SYNC)
+      // 2. Listen to Habits Subcollection
       const unsubscribeTasks = firestore()
         .collection('users')
         .doc(authUser.uid)
         .collection('habits')
         .onSnapshot(snapshot => {
-          if (!snapshot) {
-            console.log("❌ Snapshot is null");
-            return;
-          }
-          
-          console.log("📡 Real-time listener fired! Total docs:", snapshot.size);
-          
-          // Check if this is a new user (no habits yet)
+          if (!snapshot) return;
           if (snapshot.empty) {
-            console.log("📋 No habits found. Showing empty state.");
-            setTasks([]); // Just set to empty — no auto-saving anymore
+            setTasks([]);
           } else {
-            // Map the Firebase documents into a standard array
-            const fetchedTasks = snapshot.docs.map(doc => ({
-              id: doc.id,
-              ...doc.data()
-            }));
-
-            // Sort them using our smart engine before updating the UI
-            const sortedTasks = smartSortTasks(fetchedTasks);
-            setTasks(sortedTasks);
+            const fetchedTasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setTasks(smartSortTasks(fetchedTasks));
           }
-        }, error => {
-          console.error("❌ Error fetching tasks:", error);
         });
 
-      // Cleanup listeners when user logs out or component unmounts
       return () => {
         unsubscribeProfile();
         unsubscribeTasks();
       };
     });
-    
+
     return () => unsubscribeAuth();
   }, []);
 
@@ -128,11 +126,13 @@ export const AppProvider = ({ children }) => {
   // LOCAL STATE (Not moved to Firebase)
   // ==========================================
   const [lastResetDate, setLastResetDate] = useState(null);
-  const [coins, setCoins] = useState(10); 
-  const [skipsCount, setSkipsCount] = useState(0); 
+  const [coins, setCoins] = useState(10);
+  const [skipsCount, setSkipsCount] = useState(0);
   const [playfulMode, setPlayfulMode] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [businessSidebarOpen, setBusinessSidebarOpen] = useState(false);
+  const [persistenceLoaded, setPersistenceLoaded] = useState(false);
+  const [hasSeenOnboarding, setHasSeenOnboarding] = useState(false);
 
   const [businessProfile, setBusinessProfile] = useState({
     name: 'Bean & Brew',
@@ -144,90 +144,202 @@ export const AppProvider = ({ children }) => {
     logo: 'https://images.unsplash.com/photo-1511367461989-f85a21fda167?q=80&w=200&auto=format&fit=crop',
     coverPhoto: 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?q=80&w=800&auto=format&fit=crop'
   });
-  
+
   const [routineDays, setRoutineDays] = useState(null);
   const [routineSaved, setRoutineSaved] = useState(false);
 
   // ==========================================
   // LOGIC & ACTIONS
   // ==========================================
-  
-  // MIDNIGHT RESET ENGINE
+
+  // ==========================================
+  // 💾 PERSISTENCE & MIDNIGHT RESET ENGINE
+  // ==========================================
+
+  // 1. Initial Load & Local Reset
   useEffect(() => {
-    const today = new Date().toDateString();
-    if (lastResetDate !== today) {
-      // Reset all tasks via Firestore batch update
-      if (user && tasks.length > 0) {
+    const loadData = async () => {
+      try {
+        const [coinsVal, skipsVal, playfulVal, lastLogin, onboardingVal] = await Promise.all([
+          AsyncStorage.getItem('@app_coins'),
+          AsyncStorage.getItem('@app_skips'),
+          AsyncStorage.getItem('@app_playful'),
+          AsyncStorage.getItem('@app_last_login'),
+          AsyncStorage.getItem('@has_seen_onboarding')
+        ]);
+
+        if (coinsVal !== null) setCoins(parseInt(coinsVal));
+        if (playfulVal !== null) setPlayfulMode(JSON.parse(playfulVal));
+        if (onboardingVal !== null) setHasSeenOnboarding(JSON.parse(onboardingVal));
+
+        const today = new Date().toDateString();
+        if (lastLogin !== today) {
+          console.log("🌞 New Day Detected (Local). Resetting skips...");
+          setSkipsCount(0);
+          await AsyncStorage.setItem('@app_last_login', today);
+        } else if (skipsVal !== null) {
+          setSkipsCount(parseInt(skipsVal));
+        }
+
+        setPersistenceLoaded(true);
+      } catch (e) {
+        console.error("Persistence Load Error:", e);
+        setPersistenceLoaded(true);
+      }
+    };
+    loadData();
+  }, []);
+
+  // 2. Firestore Midnight Reset (Syncs with Local Reset)
+  useEffect(() => {
+    if (!user || !persistenceLoaded) return;
+
+    const resetFirestoreHabits = async () => {
+      const today = new Date().toDateString();
+      const lastLogged = userProfile?.lastLogged || null;
+
+      if (lastLogged !== today) {
+        console.log("🔥 New Day Detected (Cloud). Batch resetting Firestore habits...");
         try {
           const batch = firestore().batch();
-          tasks.forEach((task) => {
-            const taskRef = firestore()
-              .collection('users')
-              .doc(user.uid)
-              .collection('habits')
-              .doc(task.id);
-            batch.update(taskRef, { completed: false, skipped: false });
+          const snapshot = await firestore()
+            .collection('users')
+            .doc(user.uid)
+            .collection('habits')
+            .get();
+
+          snapshot.docs.forEach((doc) => {
+            batch.update(doc.ref, { completed: false, skipped: false });
           });
-          batch.commit();
+
+          // Update Cloud lastLogged date
+          batch.update(firestore().collection('users').doc(user.uid), {
+            lastLogged: today
+          });
+
+          await batch.commit();
         } catch (error) {
-          console.error("Error resetting tasks:", error);
+          console.error("Firestore Reset Error:", error);
         }
       }
-      setLastResetDate(today);
-    }
-  }, [lastResetDate, user, tasks]);
+    };
 
-  // ✅ COMPLETE TASK
-  const completeTask = async (id) => {
+    resetFirestoreHabits();
+  }, [user, userProfile, persistenceLoaded]);
+
+  // 3. Auto-Save Hooks
+  useEffect(() => {
+    if (persistenceLoaded) {
+      AsyncStorage.setItem('@app_coins', coins.toString());
+    }
+  }, [coins, persistenceLoaded]);
+
+  useEffect(() => {
+    if (persistenceLoaded) {
+      AsyncStorage.setItem('@app_skips', skipsCount.toString());
+    }
+  }, [skipsCount, persistenceLoaded]);
+
+  useEffect(() => {
+    if (persistenceLoaded) {
+      AsyncStorage.setItem('@app_playful', JSON.stringify(playfulMode));
+    }
+  }, [playfulMode, persistenceLoaded]);
+
+  // ✅ COMPLETE TASK (Refactored for Economy Engine)
+  const completeTask = async (taskId) => {
     if (!user) return;
+
+    // Find the task in our local state to determine toggle
+    const taskIndex = tasks.findIndex(t => t.id === taskId);
+    if (taskIndex === -1) return;
+
+    const task = tasks[taskIndex];
+    const isCurrentlyCompleted = task.completed;
+    const newStatus = !isCurrentlyCompleted;
+
+    // 1. Update economy (+10 if checking, -10 if unchecking)
+    const delta = newStatus ? 10 : -10;
+
+    // Update local economy first for instant feedback
+    setCoins(prev => prev + delta);
+
     try {
+      // 2. Sync to Firestore: Update the Habit
       await firestore()
         .collection('users')
         .doc(user.uid)
         .collection('habits')
-        .doc(id)
-        .update({ completed: true });
+        .doc(taskId)
+        .update({
+          completed: newStatus,
+          completedAt: newStatus ? firestore.FieldValue.serverTimestamp() : null
+        });
 
+      // 3. Sync to Firestore: Update User Profile (Points & Coins move in lockstep)
       await firestore().collection('users').doc(user.uid).set({
-        totalPoints: firestore.FieldValue.increment(10)
+        totalPoints: firestore.FieldValue.increment(delta),
+        coins: firestore.FieldValue.increment(delta)
       }, { merge: true });
 
-      setCoins(c => c + 1);
     } catch (error) {
-      console.error("Error completing task:", error);
+      console.error("Error toggling task in Firebase:", error);
+      // Rollback local economy if it fails? 
+      // For now, we'll keep it simple as Firestore listeners will fix the state.
     }
   };
 
-  // ✅ SKIP TASK
-  const skipTask = async (id, skipMethod = 'free') => {
+  // ✅ SKIP TASK (Refactored for Economy Engine)
+  const skipTask = async (taskId, method = 'free') => {
     if (!user) return;
     try {
-      setSkipsCount(prev => prev + 1);
-      const isHeavyPenalty = skipsCount >= 2;
       let penalty = 0;
-      
-      if (skipMethod === 'coins' && coins >= 5 && isHeavyPenalty) {
-        setCoins(c => c - 5);
-      } else if (skipMethod === 'ad' && isHeavyPenalty) {
-        // Watched an ad
-      } else {
-        penalty = isHeavyPenalty ? 50 : 10;
+
+      if (method === 'free') {
+        setSkipsCount(prev => prev + 1);
+      } else if (method === 'coins') {
+        penalty = 50;
+        // Update local economy
+        setCoins(prev => Math.max(0, prev - penalty));
       }
 
+      // 1. Update Habit Status
       await firestore()
         .collection('users')
         .doc(user.uid)
         .collection('habits')
-        .doc(id)
+        .doc(taskId)
         .update({ skipped: true });
 
+      // 2. Sync Economy to Firestore if there's a penalty
       if (penalty > 0) {
         await firestore().collection('users').doc(user.uid).set({
-          totalPoints: firestore.FieldValue.increment(-penalty)
+          totalPoints: firestore.FieldValue.increment(-penalty),
+          coins: firestore.FieldValue.increment(-penalty)
         }, { merge: true });
       }
     } catch (error) {
       console.error("Error skipping task:", error);
+    }
+  };
+
+  // ✅ SPEND COINS
+  const spendCoins = async (amount) => {
+    if (!user) return;
+    try {
+      // 1. Update local state
+      setCoins(prev => Math.max(0, prev - amount));
+
+      // 2. Sync to Firestore
+      await firestore().collection('users').doc(user.uid).set({
+        totalPoints: firestore.FieldValue.increment(-amount),
+        coins: firestore.FieldValue.increment(-amount)
+      }, { merge: true });
+
+      return true;
+    } catch (error) {
+      console.error("Error spending coins:", error);
+      return false;
     }
   };
 
@@ -249,14 +361,14 @@ export const AppProvider = ({ children }) => {
     let order = 50;
 
     if (typeof arg1 === 'object' && arg1 !== null) {
-      taskName        = arg1.name || arg1.text || arg1.title || '';
-      timeCategory    = arg1.time || arg1.timeCategory || 'Morning';
-      icon            = arg1.icon || '⭐';
-      descPlayful     = arg1.descPlayful || '';
-      descProfessional= arg1.descProfessional || '';
-      order           = arg1.order ?? 50;
+      taskName = arg1.name || arg1.text || arg1.title || '';
+      timeCategory = arg1.time || arg1.timeCategory || 'Morning';
+      icon = arg1.icon || '⭐';
+      descPlayful = arg1.descPlayful || '';
+      descProfessional = arg1.descProfessional || '';
+      order = arg1.order ?? 50;
     } else if (typeof arg1 === 'string') {
-      taskName     = arg1;
+      taskName = arg1;
       timeCategory = typeof arg2 === 'string' ? arg2 : 'Morning';
     }
 
@@ -295,17 +407,17 @@ export const AppProvider = ({ children }) => {
     const { estimatedTime, sortWeight } = analyzeTask(taskName);
 
     const newTask = {
-      name:            taskName,
-      timeCategory:    timeCategory,
-      icon:            icon,
-      descPlayful:     descPlayful,
-      descProfessional:descProfessional,
-      order:           order,
-      estimatedTime:   estimatedTime,
-      sortWeight:      sortWeight,
-      completed:       false,
-      skipped:         false,
-      createdAt:       new Date().toISOString(),
+      name: taskName,
+      timeCategory: timeCategory,
+      icon: icon,
+      descPlayful: descPlayful,
+      descProfessional: descProfessional,
+      order: order,
+      estimatedTime: estimatedTime,
+      sortWeight: sortWeight,
+      completed: false,
+      skipped: false,
+      createdAt: new Date().toISOString(),
     };
 
     console.log('  📦 Task ready to save:', JSON.stringify({ name: newTask.name, timeCategory: newTask.timeCategory, icon: newTask.icon }));
@@ -337,10 +449,10 @@ export const AppProvider = ({ children }) => {
     if (!user || !user.uid) {
       return false;
     }
-    
+
     try {
       const batch = firestore().batch();
-      
+
       taskArray.forEach((task) => {
         const taskRef = firestore().collection('users').doc(user.uid).collection('habits').doc();
         batch.set(taskRef, {
@@ -351,19 +463,43 @@ export const AppProvider = ({ children }) => {
           sortWeight: task.sortWeight || 0,
           completed: false,
           skipped: false,
-          createdAt: new Date().toISOString(), 
+          createdAt: new Date().toISOString(),
         });
       });
-      
+
       await batch.commit();
-      
+
       // 1. Instantly wipe the draft state so Draft Mode turns off globally
-      setDraftTasks([]); 
+      setDraftTasks([]);
       return true;
-      
+
     } catch (error) {
       console.error("Bulk Save Error:", error);
       return false;
+    }
+  };
+
+  // ✅ SAVE ONBOARDING DATA
+  const completeOnboarding = async (gender, ageBracket) => {
+    if (!user) return;
+    try {
+      await firestore().collection('users').doc(user.uid).set({
+        onboardingCompleted: true,
+        gender: gender,
+        ageBracket: ageBracket
+      }, { merge: true });
+    } catch (error) {
+      console.error("Error saving onboarding data:", error);
+    }
+  };
+ 
+  // ✅ 4. INTRO COMPLETION (Local Persistence)
+  const completeIntro = async () => {
+    try {
+      setHasSeenOnboarding(true);
+      await AsyncStorage.setItem('@has_seen_onboarding', 'true');
+    } catch (error) {
+      console.error("Error setting intro status:", error);
     }
   };
 
@@ -411,18 +547,21 @@ export const AppProvider = ({ children }) => {
 
   return (
     <AppContext.Provider value={{
-      user, 
+      user,
       userProfile,
-      points, 
-      tasks: sortedTasks, draftTasks, setDraftTasks, coins, skipsCount, routineDays, routineSaved,
-      completeTask, skipTask, addTask, removeTask, saveBulkTasks, saveRoutine, startRoutine, forceUnlock,
+      authLoading,
+      points,
+      tasks: sortedTasks, draftTasks, setDraftTasks, coins, setCoins, skipsCount, routineDays, routineSaved,
+      completeTask, skipTask, spendCoins, addTask, removeTask, saveBulkTasks, saveRoutine, startRoutine, forceUnlock,
       completedCount, skippedCount, remainingCount,
       playfulMode, setPlayfulMode,
       sidebarOpen, setSidebarOpen,
       ghostMode, setGhostMode,
       isRoutineLocked, routineLockedUntil,
       businessSidebarOpen, setBusinessSidebarOpen,
-      businessProfile, setBusinessProfile
+      businessProfile, setBusinessProfile,
+      completeOnboarding,
+      hasSeenOnboarding, completeIntro
     }}>
       {children}
     </AppContext.Provider>

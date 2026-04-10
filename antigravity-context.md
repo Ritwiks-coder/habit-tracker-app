@@ -77,9 +77,9 @@ Tasks are sorted purely into Morning ☀️, Evening 🌅, Night 🌙 tabs.
 
 Gamification, Penalties & Merchant Mode:
 
-Complete task = +10 points. Skip with coins = -50 points.
+Complete task = +10 Coins. Skip with coins = -50 Coins.
 
-Strike System: 3 strikes = -25 points penalty.
+Strike System: 3 strikes = -25 Coins penalty.
 
 Skip Escape: Watch an Ad (free skip) OR use Coins OR take a Strike.
 
@@ -91,7 +91,7 @@ User types "5min walk" -> App checks predefined tasks -> If no match, calls Clau
 
 Leaderboard & Ghost Mode:
 
-A ranked list of users based on 🔥 score.
+A ranked list of users based on 🪙 score.
 
 Ghost Mode Toggle: When ON, all other users are blurred (opacity 0.25) and names show as "••••••" to reduce competitive anxiety.
 
